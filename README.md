@@ -25,6 +25,7 @@ Steckst du eine SD-Karte (über einen USB-Kartenleser) oder eine Kamera an den U
 | `/stapeln` | RAW+HIF/JPG-Paare der ganzen Bibliothek stapeln |
 | `/stapeln JJJJ-MM-TT` | nur, was seit diesem Tag hochgeladen wurde |
 | 🗂️ Stapeln … | Ergebnis des Stapel-Laufs nach jedem Import |
+| `/update` | Neue Version installieren. Der Bot meldet einmal am Tag, wenn es eine gibt. |
 | `/hilfe` | Alle Befehle |
 
 Der Bot reagiert nur auf Nachrichten aus dem eingetragenen Chat (`TG_CHAT_ID`).
@@ -56,7 +57,7 @@ php /boot/config/camera-import/stack.php --dry-run   # nur anzeigen, nichts änd
 Voraussetzung ist das Plugin **User Scripts** (Apps → „User Scripts“). Alles Weitere passiert in der Unraid-Oberfläche:
 
 1. Settings → User Scripts → **Add New Script**, Name `camera-import-install`.
-2. Zahnrad → **Edit Script**. Den kompletten Inhalt von [`camera-import-install.sh`](camera-import-install.sh) hineinkopieren.
+2. Zahnrad → **Edit Script**. Den kompletten Inhalt von `camera-import-install.sh` aus dem [neuesten Release](https://github.com/DevHovAI/unraid-immich-import/releases/latest) hineinkopieren.
 3. Oben im Skript die Einstellungen ausfüllen: Immich-Adresse, API-Key, Telegram-Token und Chat-ID. **Save Changes**.
 4. Den Zeitplan auf **At Startup of Array** stellen und auf **Run Script** klicken.
 
@@ -64,7 +65,7 @@ Das Skript lädt immich-go herunter, legt das User Script `camera-import` für d
 
 **Einstellung ändern**, z.B. einen neuen API-Key: oben im Skript ändern, speichern, **Run Script**.
 
-**Neue Version einspielen**: den Inhalt des Skripts komplett durch die neue `camera-import-install.sh` ersetzen, speichern, **Run Script**. Deine bisherigen Einstellungen übernimmt es dabei automatisch.
+**Neue Version einspielen**: In Telegram `/update` schicken. Das Skript lädt die neueste Version, ersetzt sich selbst und übernimmt deine Einstellungen. Ohne Telegram geht es auch von Hand: den Inhalt durch die neue `camera-import-install.sh` ersetzen, speichern, **Run Script**.
 
 **immich-go aktualisieren**: `IMMICH_GO_VERSION` oben im Skript ändern, **Run Script**.
 
@@ -96,6 +97,8 @@ Im Kameramenü die USB-Verbindung auf **Massenspeicher (MSC)** stellen. Steht do
 ## Entwicklung
 
 Die Programmteile liegen einzeln in `boot/camera-import/` und `user.scripts/camera-import/`, die Einstellungen und die Installationslogik in `installer/`. `build.sh` setzt daraus `camera-import-install.sh` zusammen. Die Datei ist im Repo, damit man sie direkt kopieren kann; die CI prüft, dass sie aktuell ist.
+
+Release: `VERSION` und `CHANGELOG.md` anpassen, `just build`, mergen, dann Tag `vX.Y.Z` auf main pushen. Der Workflow hängt `camera-import-install.sh` an das Release; von dort holt `/update` sie.
 
 ```bash
 just check     # bauen, bash -n und shellcheck für alle Skripte

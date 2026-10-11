@@ -12,6 +12,7 @@ HELP="Befehle:
 /log – letzte Zeilen des Protokolls
 /stapeln – RAW+HIF/JPG-Paare der ganzen Bibliothek stapeln
 /stapeln JJJJ-MM-TT – nur seit diesem Tag Hochgeladenes
+/update – neue Version installieren
 /kein – beim Albumnamen: kein Album"
 
 handle() {
@@ -75,6 +76,19 @@ $(tr '\r' '\n' < "$file" | grep -v '^Immich read' | tail -n 15 | cut -c1-250)"
       notify "🗂️ Stapeln gestartet (${arg:-ganze Bibliothek}) …"
       setsid bash "$BASE_DIR/stack.sh" "$arg" 0 >> "$SCRIPT_LOG" 2>&1 < /dev/null &
       ;;
+    /update)
+      local latest
+      if import_running || stack_running; then
+        notify "⏳ Erst nach dem laufenden Import bzw. Stapeln – dann noch einmal /update."
+        return
+      fi
+      if ! latest=$(newer_version); then
+        notify "✅ v$(installed_version) ist aktuell."
+        return
+      fi
+      notify "⬇️ Update auf v$latest wird installiert. Der Bot startet dabei neu, gleich kommt eine Bestätigung."
+      setsid bash "$BASE_DIR/update.sh" >> "$SCRIPT_LOG" 2>&1 < /dev/null &
+      ;;
     /kein)
       if [[ -e "$ALBUM_REQUEST" ]]; then
         echo "-" > "$ALBUM_ANSWER"
@@ -98,15 +112,22 @@ main() {
       {"command":"letzter","description":"Zusammenfassung des letzten Imports"},
       {"command":"log","description":"Letzte Zeilen des Protokolls"},
       {"command":"stapeln","description":"RAW+HIF/JPG-Paare stapeln (optional: ab Datum)"},
+      {"command":"update","description":"Neue Version installieren"},
       {"command":"hilfe","description":"Alle Befehle"}]' >/dev/null 2>&1
 
   # Nachrichten von vor dem Start überspringen
   uid=$(tg_updates -1 | tail -n1 | cut -f1)
   offset=$(( ${uid:-0} + 1 ))
   log "Bot gestartet"
+  local last_check=0
 
   while :; do
     load_config || { sleep 60; continue; }
+    # Einmal am Tag nach einer neuen Version schauen
+    if (( $(date +%s) - last_check > 86400 )); then
+      check_self_update
+      last_check=$(date +%s)
+    fi
     if ! updates=$(tg_updates "$offset" 50); then
       sleep 10   # Netzwerk- oder API-Fehler: nicht im Kreis drehen
       continue

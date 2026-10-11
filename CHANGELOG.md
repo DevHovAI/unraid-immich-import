@@ -1,8 +1,11 @@
 # Changelog
 
-## [Unveröffentlicht]
+## [1.0.0] – 2026-10-12
+
+Erste veröffentlichte Version.
 
 ### Hinzugefügt
+- Updates über Telegram: der Bot meldet neue Versionen, /update installiert sie
 - /status zeigt auch den Fortschritt beim Stapeln, mit geschätzter Restzeit
 - Ein einziges Installationsskript `camera-import-install` mit den Einstellungen oben im Skript: lädt immich-go, legt den Import an, startet den Bot, prüft Immich und Telegram. Ersetzt `camera-import-setup`, die conf-Vorlage und die Handarbeit mit `scp`
 - Automatischer Import von SD-Karte oder Kamera nach Immich per udev und User Scripts

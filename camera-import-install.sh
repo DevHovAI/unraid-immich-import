@@ -84,6 +84,7 @@ declare -A VORLAGE_WERTE=(
   [IMMICH_GO_VERSION]="0.32.0"
   [CHECK_UPDATES]="1"
 )
+CAMERA_IMPORT_VERSION="1.0.0"
 
 # ============== AB HIER NICHTS ÄNDERN – Installationslogik ===================
 
@@ -231,6 +232,7 @@ install_files() {
     rm -rf "$US_DIR/camera-import-setup"
   fi
   rm -f "$BASE_DIR/camera-import.conf.example" "$BASE_DIR/bin/README.md"
+  echo "$CAMERA_IMPORT_VERSION" > "$BASE_DIR/version"
   ok "Programmdateien geschrieben"
 }
 
@@ -321,7 +323,7 @@ main() {
     die "Dieses Skript darf nicht „camera-import“ heißen – bitte z.B. „camera-import-install“ nennen."
   fi
 
-  echo "camera-import wird eingerichtet …"
+  echo "camera-import v$CAMERA_IMPORT_VERSION wird eingerichtet …"
   merge_previous
   check_settings
   write_conf
@@ -337,7 +339,7 @@ main() {
   # shellcheck source=/dev/null
   source "$BASE_DIR/lib.sh"
   load_config >/dev/null
-  msg="✅ camera-import eingerichtet (immich-go v$IMMICH_GO_VERSION)."
+  msg="✅ camera-import v$CAMERA_IMPORT_VERSION eingerichtet (immich-go v$IMMICH_GO_VERSION)."
   (( DRY_RUN )) && msg+=$'\n'"Probelauf ist an (DRY_RUN=1) – es wird nichts hochgeladen."
   (( ${#WARNINGS[@]} )) && msg+=$'\n'"$(printf '⚠️ %s\n' "${WARNINGS[@]}")"
   if [[ -n "$TG_BOT_TOKEN" ]]; then
@@ -372,6 +374,9 @@ CONF_FILE="$BASE_DIR/camera-import.conf"
 STATE_DIR="/tmp/camera-import"            # Laufzeitstatus, weg nach Neustart
 LAST_FILE="$BASE_DIR/letzter-import.txt"  # übersteht einen Neustart
 UPDATE_STAMP="$BASE_DIR/.immich-go-gemeldet"
+REPO="DevHovAI/unraid-immich-import"
+VERSION_FILE="$BASE_DIR/version"               # vom Installationsskript geschrieben
+SELF_UPDATE_STAMP="$BASE_DIR/.update-gemeldet"
 SCRIPT_LOG="/tmp/user.scripts/tmpScripts/camera-import/log.txt"
 IMMICH_GO="/usr/local/bin/immich-go"
 
@@ -490,6 +495,46 @@ Aktualisieren: im Skript camera-import-install IMMICH_GO_VERSION=\"$latest\" set
 https://github.com/simulot/immich-go/releases/tag/v$latest"
   echo "$latest" > "$UPDATE_STAMP"
 }
+
+installed_version() { cat "$VERSION_FILE" 2>/dev/null || echo 0; }
+
+# Neueste veröffentlichte Version auf GitHub, z.B. "1.2.0"
+latest_version() {
+  curl -sS -m 15 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+    | grep -oE '"tag_name": *"v?[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'
+}
+
+# Neuere Version als installiert? Gibt sie aus.
+newer_version() {
+  local installed latest
+  installed=$(installed_version)
+  latest=$(latest_version)
+  [[ -n "$latest" && "$latest" != "$installed" ]] || return 1
+  [[ "$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n1)" == "$latest" ]] || return 1
+  echo "$latest"
+}
+
+# Einmal je neuer Version per Telegram auf /update hinweisen
+check_self_update() {
+  (( CHECK_UPDATES )) || return 0
+  local latest
+  latest=$(newer_version) || return 0
+  [[ "$(cat "$SELF_UPDATE_STAMP" 2>/dev/null)" == "$latest" ]] && return 0
+  notify "🆕 camera-import v$latest ist verfügbar (installiert: v$(installed_version)).
+Änderungen: https://github.com/$REPO/releases/tag/v$latest
+Installieren: /update"
+  echo "$latest" > "$SELF_UPDATE_STAMP"
+}
+
+# Das Installationsskript in User Scripts (erkennbar an seiner Markierung)
+installer_file() {
+  local f
+  for f in /boot/config/plugins/user.scripts/scripts/*/script; do
+    [[ "$f" == */scripts/camera-import/script ]] && continue
+    grep -qx '# camera-import-installer' "$f" 2>/dev/null && { echo "$f"; return 0; }
+  done
+  return 1
+}
 __CAMERA_IMPORT_EOF__
 put "$BASE_DIR/bot.sh" <<'__CAMERA_IMPORT_EOF__'
 #!/bin/bash
@@ -506,6 +551,7 @@ HELP="Befehle:
 /log – letzte Zeilen des Protokolls
 /stapeln – RAW+HIF/JPG-Paare der ganzen Bibliothek stapeln
 /stapeln JJJJ-MM-TT – nur seit diesem Tag Hochgeladenes
+/update – neue Version installieren
 /kein – beim Albumnamen: kein Album"
 
 handle() {
@@ -569,6 +615,19 @@ $(tr '\r' '\n' < "$file" | grep -v '^Immich read' | tail -n 15 | cut -c1-250)"
       notify "🗂️ Stapeln gestartet (${arg:-ganze Bibliothek}) …"
       setsid bash "$BASE_DIR/stack.sh" "$arg" 0 >> "$SCRIPT_LOG" 2>&1 < /dev/null &
       ;;
+    /update)
+      local latest
+      if import_running || stack_running; then
+        notify "⏳ Erst nach dem laufenden Import bzw. Stapeln – dann noch einmal /update."
+        return
+      fi
+      if ! latest=$(newer_version); then
+        notify "✅ v$(installed_version) ist aktuell."
+        return
+      fi
+      notify "⬇️ Update auf v$latest wird installiert. Der Bot startet dabei neu, gleich kommt eine Bestätigung."
+      setsid bash "$BASE_DIR/update.sh" >> "$SCRIPT_LOG" 2>&1 < /dev/null &
+      ;;
     /kein)
       if [[ -e "$ALBUM_REQUEST" ]]; then
         echo "-" > "$ALBUM_ANSWER"
@@ -592,15 +651,22 @@ main() {
       {"command":"letzter","description":"Zusammenfassung des letzten Imports"},
       {"command":"log","description":"Letzte Zeilen des Protokolls"},
       {"command":"stapeln","description":"RAW+HIF/JPG-Paare stapeln (optional: ab Datum)"},
+      {"command":"update","description":"Neue Version installieren"},
       {"command":"hilfe","description":"Alle Befehle"}]' >/dev/null 2>&1
 
   # Nachrichten von vor dem Start überspringen
   uid=$(tg_updates -1 | tail -n1 | cut -f1)
   offset=$(( ${uid:-0} + 1 ))
   log "Bot gestartet"
+  local last_check=0
 
   while :; do
     load_config || { sleep 60; continue; }
+    # Einmal am Tag nach einer neuen Version schauen
+    if (( $(date +%s) - last_check > 86400 )); then
+      check_self_update
+      last_check=$(date +%s)
+    fi
     if ! updates=$(tg_updates "$offset" 50); then
       sleep 10   # Netzwerk- oder API-Fehler: nicht im Kreis drehen
       continue
@@ -896,6 +962,36 @@ foreach ($pairs as $n => [$primary, $other]) {
 printf("ERGEBNIS paare=%d angelegt=%d mehrdeutig=%d ohnedatum=%d fehler=%d\n",
        count($pairs), $created, $ambiguous, $nodate, $errors);
 exit($errors ? 1 : 0);
+__CAMERA_IMPORT_EOF__
+put "$BASE_DIR/update.sh" <<'__CAMERA_IMPORT_EOF__'
+#!/bin/bash
+# Holt die neueste camera-import-install.sh von GitHub, ersetzt damit das
+# Installationsskript in User Scripts und führt es aus. Die Einstellungen
+# übernimmt das Installationsskript selbst aus der bisherigen Konfiguration.
+# Gestartet vom Bot mit /update.
+
+# shellcheck source=lib.sh
+source "$(dirname "$0")/lib.sh"
+load_config || exit 1
+
+fail() { log "Update fehlgeschlagen: $*"; notify "❌ Update fehlgeschlagen: $*"; exit 1; }
+
+own=$(installer_file) || fail "Installationsskript in User Scripts nicht gefunden."
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+curl -fsSL -m 120 "https://github.com/$REPO/releases/latest/download/camera-import-install.sh" -o "$tmp" \
+  || fail "Download von GitHub fehlgeschlagen."
+if ! grep -qx '# camera-import-installer' "$tmp" || ! bash -n "$tmp"; then
+  fail "Die heruntergeladene Datei ist kein gültiges Installationsskript."
+fi
+
+cp "$tmp" "$own"   # /boot ist FAT: cp statt mv
+log "Update: $own ersetzt, wird ausgeführt"
+ilog="/tmp/user.scripts/tmpScripts/$(basename "$(dirname "$own")")/log.txt"
+mkdir -p "$(dirname "$ilog")"
+# Das Installationsskript beendet und startet den Bot neu und meldet sich
+# selbst mit ✅ und der neuen Version.
+bash "$own" >> "$ilog" 2>&1 || fail "Installationsskript meldet einen Fehler, siehe Log von camera-import-install."
 __CAMERA_IMPORT_EOF__
 put "$IMPORT_DIR/script" <<'__CAMERA_IMPORT_EOF__'
 #!/bin/bash

@@ -2,7 +2,7 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-scripts := "user.scripts/camera-import/script boot/camera-import/lib.sh boot/camera-import/bot.sh boot/camera-import/stack.sh camera-import-install.sh"
+scripts := "user.scripts/camera-import/script boot/camera-import/lib.sh boot/camera-import/bot.sh boot/camera-import/stack.sh boot/camera-import/update.sh camera-import-install.sh"
 
 # Rezepte auflisten
 default:

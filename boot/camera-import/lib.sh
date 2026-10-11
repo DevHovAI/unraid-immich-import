@@ -9,6 +9,9 @@ CONF_FILE="$BASE_DIR/camera-import.conf"
 STATE_DIR="/tmp/camera-import"            # Laufzeitstatus, weg nach Neustart
 LAST_FILE="$BASE_DIR/letzter-import.txt"  # übersteht einen Neustart
 UPDATE_STAMP="$BASE_DIR/.immich-go-gemeldet"
+REPO="DevHovAI/unraid-immich-import"
+VERSION_FILE="$BASE_DIR/version"               # vom Installationsskript geschrieben
+SELF_UPDATE_STAMP="$BASE_DIR/.update-gemeldet"
 SCRIPT_LOG="/tmp/user.scripts/tmpScripts/camera-import/log.txt"
 IMMICH_GO="/usr/local/bin/immich-go"
 
@@ -126,4 +129,44 @@ check_immich_go_update() {
 Aktualisieren: im Skript camera-import-install IMMICH_GO_VERSION=\"$latest\" setzen und Run Script klicken (vorher Release-Notes lesen).
 https://github.com/simulot/immich-go/releases/tag/v$latest"
   echo "$latest" > "$UPDATE_STAMP"
+}
+
+installed_version() { cat "$VERSION_FILE" 2>/dev/null || echo 0; }
+
+# Neueste veröffentlichte Version auf GitHub, z.B. "1.2.0"
+latest_version() {
+  curl -sS -m 15 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+    | grep -oE '"tag_name": *"v?[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'
+}
+
+# Neuere Version als installiert? Gibt sie aus.
+newer_version() {
+  local installed latest
+  installed=$(installed_version)
+  latest=$(latest_version)
+  [[ -n "$latest" && "$latest" != "$installed" ]] || return 1
+  [[ "$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n1)" == "$latest" ]] || return 1
+  echo "$latest"
+}
+
+# Einmal je neuer Version per Telegram auf /update hinweisen
+check_self_update() {
+  (( CHECK_UPDATES )) || return 0
+  local latest
+  latest=$(newer_version) || return 0
+  [[ "$(cat "$SELF_UPDATE_STAMP" 2>/dev/null)" == "$latest" ]] && return 0
+  notify "🆕 camera-import v$latest ist verfügbar (installiert: v$(installed_version)).
+Änderungen: https://github.com/$REPO/releases/tag/v$latest
+Installieren: /update"
+  echo "$latest" > "$SELF_UPDATE_STAMP"
+}
+
+# Das Installationsskript in User Scripts (erkennbar an seiner Markierung)
+installer_file() {
+  local f
+  for f in /boot/config/plugins/user.scripts/scripts/*/script; do
+    [[ "$f" == */scripts/camera-import/script ]] && continue
+    grep -qx '# camera-import-installer' "$f" 2>/dev/null && { echo "$f"; return 0; }
+  done
+  return 1
 }

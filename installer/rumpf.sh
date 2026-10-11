@@ -145,6 +145,7 @@ install_files() {
     rm -rf "$US_DIR/camera-import-setup"
   fi
   rm -f "$BASE_DIR/camera-import.conf.example" "$BASE_DIR/bin/README.md"
+  echo "$CAMERA_IMPORT_VERSION" > "$BASE_DIR/version"
   ok "Programmdateien geschrieben"
 }
 
@@ -235,7 +236,7 @@ main() {
     die "Dieses Skript darf nicht „camera-import“ heißen – bitte z.B. „camera-import-install“ nennen."
   fi
 
-  echo "camera-import wird eingerichtet …"
+  echo "camera-import v$CAMERA_IMPORT_VERSION wird eingerichtet …"
   merge_previous
   check_settings
   write_conf
@@ -251,7 +252,7 @@ main() {
   # shellcheck source=/dev/null
   source "$BASE_DIR/lib.sh"
   load_config >/dev/null
-  msg="✅ camera-import eingerichtet (immich-go v$IMMICH_GO_VERSION)."
+  msg="✅ camera-import v$CAMERA_IMPORT_VERSION eingerichtet (immich-go v$IMMICH_GO_VERSION)."
   (( DRY_RUN )) && msg+=$'\n'"Probelauf ist an (DRY_RUN=1) – es wird nichts hochgeladen."
   (( ${#WARNINGS[@]} )) && msg+=$'\n'"$(printf '⚠️ %s\n' "${WARNINGS[@]}")"
   if [[ -n "$TG_BOT_TOKEN" ]]; then
