@@ -223,8 +223,12 @@ install_files() {
   printf 'camera-import\n' > "$IMPORT_DIR/name"
   printf 'SD-Karte/Kamera nach Immich importieren – startet beim Einstecken von selbst. Einstellungen: Skript camera-import-install\n' \
     > "$IMPORT_DIR/description"
-  # Reste der alten Einrichtung mit drei Teilen
-  rm -rf "$US_DIR/camera-import-setup" "$BASE_DIR/camera-import.conf.example" "$BASE_DIR/bin/README.md"
+  # Reste der alten Einrichtung – camera-import-setup aber nur, wenn nicht
+  # dieses Skript selbst dort eingefügt wurde
+  if ! grep -qx '# camera-import-installer' "$US_DIR/camera-import-setup/script" 2>/dev/null; then
+    rm -rf "$US_DIR/camera-import-setup"
+  fi
+  rm -f "$BASE_DIR/camera-import.conf.example" "$BASE_DIR/bin/README.md"
   ok "Programmdateien geschrieben"
 }
 
