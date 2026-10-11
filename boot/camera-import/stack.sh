@@ -33,8 +33,12 @@ args=()
 (( DRY_RUN )) && args+=(--dry-run)
 
 log "Stapeln ($scope) gestartet"
-out=$(php "$BASE_DIR/stack.php" "${args[@]}" 2>&1)
-while IFS= read -r line; do echo "  stapeln | $line"; done <<< "$out"
+# Ausgabe sofort ins Log, damit /log den Fortschritt zeigt
+tmp=$(mktemp)
+php "$BASE_DIR/stack.php" "${args[@]}" 2>&1 | tee "$tmp" \
+  | while IFS= read -r line; do echo "  stapeln | $line"; done
+out=$(cat "$tmp")
+rm -f "$tmp"
 
 result=$(grep '^ERGEBNIS' <<< "$out" | tail -n1)
 val() { sed -nE "s/.*$1=([0-9]+).*/\1/p" <<< "$result"; }

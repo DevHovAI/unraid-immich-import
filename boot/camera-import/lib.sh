@@ -31,7 +31,8 @@ load_config() {
   # shellcheck source=/dev/null
   source "$CONF_FILE"
   IMMICH_URL="${IMMICH_URL%/}"
-  mkdir -p "$STATE_DIR"
+  # /tmp liegt im RAM: nach einem Neustart fehlt der Log-Ordner, bis ein Import lief
+  mkdir -p "$STATE_DIR" "$(dirname "$SCRIPT_LOG")"
 }
 
 log() { echo "$(date '+%F %T') $*"; }

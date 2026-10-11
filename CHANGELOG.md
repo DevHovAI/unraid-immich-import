@@ -17,4 +17,6 @@
 - Eigener Stapel-Schritt für RAW+HIF/JPG-Paare (Name, Aufnahmezeit, Kamera), auch für ältere Bilder per /stapeln
 
 ### Behoben
+- /stapeln startete nach einem Neustart nicht, solange noch kein Import gelaufen war (Log-Ordner fehlte)
+- Stapeln bricht ab, statt endlos zu laufen, wenn Immich beim Blättern dieselben Bilder erneut liefert
 - /status und Fehlermeldungen lesen das Protokollformat von immich-go richtig (INF/ERR statt level=…)

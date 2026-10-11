@@ -383,7 +383,8 @@ load_config() {
   # shellcheck source=/dev/null
   source "$CONF_FILE"
   IMMICH_URL="${IMMICH_URL%/}"
-  mkdir -p "$STATE_DIR"
+  # /tmp liegt im RAM: nach einem Neustart fehlt der Log-Ordner, bis ein Import lief
+  mkdir -p "$STATE_DIR" "$(dirname "$SCRIPT_LOG")"
 }
 
 log() { echo "$(date '+%F %T') $*"; }
@@ -620,8 +621,12 @@ args=()
 (( DRY_RUN )) && args+=(--dry-run)
 
 log "Stapeln ($scope) gestartet"
-out=$(php "$BASE_DIR/stack.php" "${args[@]}" 2>&1)
-while IFS= read -r line; do echo "  stapeln | $line"; done <<< "$out"
+# Ausgabe sofort ins Log, damit /log den Fortschritt zeigt
+tmp=$(mktemp)
+php "$BASE_DIR/stack.php" "${args[@]}" 2>&1 | tee "$tmp" \
+  | while IFS= read -r line; do echo "  stapeln | $line"; done
+out=$(cat "$tmp")
+rm -f "$tmp"
 
 result=$(grep '^ERGEBNIS' <<< "$out" | tail -n1)
 val() { sed -nE "s/.*$1=([0-9]+).*/\1/p" <<< "$result"; }
@@ -737,6 +742,7 @@ if (!empty($opt['since'])) {
 
 $groups = [];
 $seen = 0;
+$ids = [];
 $page = 1;
 while (true) {
     [$status, $res] = api('POST', '/search/metadata', $query);
@@ -745,7 +751,11 @@ while (true) {
         echo "ERGEBNIS paare=0 angelegt=0 mehrdeutig=0 ohnedatum=0 fehler=1\n";
         exit(1);
     }
+    $new = 0;
     foreach ($res['assets']['items'] as $a) {
+        if (isset($ids[$a['id']])) continue;
+        $ids[$a['id']] = true;
+        $new++;
         $seen++;
         if (($a['type'] ?? '') !== 'IMAGE' || !empty($a['isTrashed'])) continue;
         $ext = ext_of($a['originalFileName'] ?? '');
@@ -760,6 +770,13 @@ while (true) {
             'stacked' => !empty($a['stack']),
         ];
     }
+    // Liefert Immich nur schon Gelesenes, klappt das Blättern nicht: abbrechen
+    // statt endlos dieselbe Seite zu holen
+    if ($new === 0 && $res['assets']['items']) {
+        fwrite(STDERR, "Blättern fehlgeschlagen: Immich liefert dieselben Bilder erneut\n");
+        echo "ERGEBNIS paare=0 angelegt=0 mehrdeutig=0 ohnedatum=0 fehler=1\n";
+        exit(1);
+    }
     // Ab Immich 3.2 per Cursor, davor per Seitenzahl
     if (!empty($res['assets']['nextCursor'])) {
         $query['cursor'] = $res['assets']['nextCursor'];
@@ -768,7 +785,7 @@ while (true) {
     } else {
         break;
     }
-    if (++$page % 10 === 0) echo "… $seen Dateien gelesen\n";
+    if (++$page % 5 === 0) { echo "… $seen Dateien gelesen\n"; flush(); }
 }
 echo "$seen Dateien gelesen, " . count($groups) . " Dateinamen\n";
 
