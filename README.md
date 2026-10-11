@@ -25,7 +25,7 @@ Steckst du eine SD-Karte (über einen USB-Kartenleser) oder eine Kamera an den U
 | `/stapeln` | RAW+HIF/JPG-Paare der ganzen Bibliothek stapeln |
 | `/stapeln JJJJ-MM-TT` | nur, was seit diesem Tag hochgeladen wurde |
 | 🗂️ Stapeln … | Ergebnis des Stapel-Laufs nach jedem Import |
-| `/update` | Neue Version installieren. Der Bot meldet einmal am Tag, wenn es eine gibt. |
+| `/update` | Neue Version installieren. Ob es eine gibt, prüft der Bot beim Array-Start und wenn du ihm schreibst. |
 | `/hilfe` | Alle Befehle |
 
 Der Bot reagiert nur auf Nachrichten aus dem eingetragenen Chat (`TG_CHAT_ID`).

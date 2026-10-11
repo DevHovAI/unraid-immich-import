@@ -84,7 +84,7 @@ declare -A VORLAGE_WERTE=(
   [IMMICH_GO_VERSION]="0.32.0"
   [CHECK_UPDATES]="1"
 )
-CAMERA_IMPORT_VERSION="1.0.0"
+CAMERA_IMPORT_VERSION="1.0.1"
 
 # ============== AB HIER NICHTS ÄNDERN – Installationslogik ===================
 
@@ -658,15 +658,12 @@ main() {
   uid=$(tg_updates -1 | tail -n1 | cut -f1)
   offset=$(( ${uid:-0} + 1 ))
   log "Bot gestartet"
-  local last_check=0
+  # Nach Updates nur beim Start (= Array-Start oder Run Script) und bei
+  # Nachrichten an den Bot schauen, nicht regelmäßig im Hintergrund
+  check_self_update &
 
   while :; do
     load_config || { sleep 60; continue; }
-    # Einmal am Tag nach einer neuen Version schauen
-    if (( $(date +%s) - last_check > 86400 )); then
-      check_self_update
-      last_check=$(date +%s)
-    fi
     if ! updates=$(tg_updates "$offset" 50); then
       sleep 10   # Netzwerk- oder API-Fehler: nicht im Kreis drehen
       continue
@@ -674,7 +671,10 @@ main() {
     while IFS=$'\t' read -r uid chat text; do
       [[ -n "$uid" ]] || continue
       offset=$(( uid + 1 ))
-      [[ "$chat" == "$TG_CHAT_ID" ]] && handle "$text"
+      if [[ "$chat" == "$TG_CHAT_ID" ]]; then
+        handle "$text"
+        [[ "$text" == /update* ]] || check_self_update &
+      fi
     done <<< "$updates"
   done
 }

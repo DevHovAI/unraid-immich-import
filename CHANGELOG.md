@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.1] – 2026-10-12
+
+### Geändert
+- Nach Updates wird nur noch beim Array-Start und bei Nachrichten an den Bot geschaut, nicht mehr täglich im Hintergrund
+
 ## [1.0.0] – 2026-10-12
 
 Erste veröffentlichte Version.
