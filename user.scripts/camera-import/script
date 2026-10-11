@@ -1,0 +1,242 @@
+#!/bin/bash
+# Importiert Fotos/Videos von SD-Karte oder Kamera (USB-Massenspeicher) nach Immich
+# und meldet das Ergebnis per Telegram.
+# Wird von udev mit dem Partitionsnamen (z.B. sdb1) aufgerufen; ohne Argument
+# werden alle angeschlossenen USB-Partitionen mit DCIM-Ordner importiert.
+# Zeitplan in User Scripts: "Schedule Disabled"
+# Einstellungen: /boot/config/camera-import/camera-import.conf
+
+# shellcheck source=../../boot/camera-import/lib.sh
+source /boot/config/camera-import/lib.sh
+
+MOUNT_BASE="/mnt/camera-import"
+LOCK_FILE="/var/run/camera-import.lock"
+IMMICH_GO_LOG_DIR="/tmp/user.scripts/tmpScripts/camera-import"
+
+is_usb_partition() {
+  udevadm info --query=property --name="/dev/$1" 2>/dev/null | grep -q '^ID_BUS=usb$'
+}
+
+# Wert aus dem immich-go-Bericht lesen, z.B. "  uploaded successfully   :      12  (3.1 GB)"
+report_value() {
+  local v
+  v=$(grep -E "^\s*$1\s*:" "$2" | tail -n1 | sed -E 's/.*:\s*([0-9]+).*/\1/')
+  echo "${v:-0}"
+}
+
+immich_reachable() {
+  curl -fsS -m 10 "$IMMICH_URL/api/server/ping" 2>/dev/null | grep -q pong
+}
+
+# Albumnamen nach ALBUM_MODE bestimmen; im Modus "ask" per Telegram fragen
+choose_album() {
+  local label="$1" count="$2" default answer waited=0
+  default="Import $(date +%F)"
+  case "$ALBUM_MODE" in
+    fixed) echo "$IMMICH_ALBUM" ;;
+    date)  echo "$default" ;;
+    ask)
+      rm -f "$ALBUM_ANSWER"
+      touch "$ALBUM_REQUEST"
+      notify "📷 Karte erkannt: $count Dateien von $label${MODE}
+In welches Album? Antworte mit dem Namen oder /kein.
+Ohne Antwort in $((ALBUM_ASK_TIMEOUT / 60)) Min: \"$default\"" >&2  # stdout ist der Albumname
+      while (( waited < ALBUM_ASK_TIMEOUT )) && [[ ! -s "$ALBUM_ANSWER" ]]; do
+        sleep 2; (( waited += 2 ))
+      done
+      answer=$(head -n1 "$ALBUM_ANSWER" 2>/dev/null)
+      rm -f "$ALBUM_REQUEST" "$ALBUM_ANSWER"
+      case "$answer" in
+        "") echo "$default" ;;
+        -)  echo "" ;;
+        *)  echo "$answer" ;;
+      esac
+      ;;
+    *) echo "" ;;
+  esac
+}
+
+# Meldet Zwischenstände bei den Prozentmarken aus PROGRESS_STEPS.
+# Überspringt der Fortschritt mehrere Marken auf einmal, kommt nur die höchste.
+progress_watch() {
+  local steps=() hit
+  read -r -a steps <<< "$PROGRESS_STEPS"
+  while kill -0 "$PID" 2>/dev/null && (( ${#steps[@]} )); do
+    sleep 30
+    progress
+    hit=""
+    while (( ${#steps[@]} )) && (( PROG_PCT >= steps[0] )); do
+      hit=${steps[0]}
+      steps=("${steps[@]:1}")
+    done
+    [[ -n "$hit" ]] && notify "⏳ $hit % geschafft ($LABEL): $PROG_DONE von $TOTAL Dateien, Laufzeit $(fmt_dur $(( $(date +%s) - START )))"
+  done
+}
+
+import_partition() {
+  local kname="$1" dev="/dev/$1" mnt mounted_by_us=0 label
+  [[ -b "$dev" ]] || { log "$dev existiert nicht"; return 0; }
+
+  mnt=$(findmnt -nro TARGET --source "$dev" | head -n1)
+  if [[ -z "$mnt" ]]; then
+    mnt="$MOUNT_BASE/$kname"
+    mkdir -p "$mnt"
+    if ! mount -o ro "$dev" "$mnt"; then
+      log "$dev konnte nicht eingehängt werden"
+      notify "❌ Karte/Kamera an $dev konnte nicht eingehängt werden. Beschädigt oder unbekanntes Dateisystem?"
+      rmdir "$mnt" 2>/dev/null
+      return 0
+    fi
+    mounted_by_us=1
+  fi
+
+  # Aushängen: selbst eingehängt → umount; von Unassigned Devices → über UD
+  release_card() {
+    if (( mounted_by_us )); then
+      umount "$mnt" && rmdir "$mnt" 2>/dev/null
+      return 0
+    elif (( AUTO_UNMOUNT )) && [[ -x /usr/local/sbin/rc.unassigned ]]; then
+      /usr/local/sbin/rc.unassigned umount "$dev" >/dev/null 2>&1 && return 0
+    fi
+    return 1
+  }
+
+  if [[ ! -d "$mnt/DCIM" ]]; then
+    log "$dev: kein DCIM-Ordner, wird ignoriert"
+    (( mounted_by_us )) && release_card
+    return 0
+  fi
+
+  label=$(lsblk -no LABEL "$dev" 2>/dev/null)
+  label="${label:-$kname}"
+
+  local paths=("$mnt/DCIM")
+  [[ -d "$mnt/PRIVATE/M4ROOT/CLIP" ]] && paths+=("$mnt/PRIVATE/M4ROOT/CLIP")
+
+  local count
+  count=$(find "${paths[@]}" -type f \( -iname '*.jpg' -o -iname '*.arw' -o -iname '*.hif' \
+    -o -iname '*.heif' -o -iname '*.mp4' -o -iname '*.mts' \) | wc -l)
+  log "$dev ($label): $count Dateien gefunden in ${paths[*]}"
+
+  if ! immich_reachable; then
+    log "Immich unter $IMMICH_URL nicht erreichbar"
+    notify "❌ Immich nicht erreichbar ($IMMICH_URL). Import von $label nicht gestartet."
+    (( mounted_by_us )) && release_card
+    return 0
+  fi
+
+  local album
+  album=$(choose_album "$label" "$count")
+  log "Album: ${album:-keins}"
+
+  local args=(upload from-folder
+    --server="$IMMICH_URL" --api-key="$IMMICH_API_KEY"
+    --no-ui --pause-immich-jobs=false --on-errors=continue
+    --manage-raw-jpeg="$RAW_JPEG")
+  [[ -n "$album" ]] && args+=(--into-album="$album")
+  (( DRY_RUN )) && args+=(--dry-run)
+
+  local out golog start rc pid
+  mkdir -p "$IMMICH_GO_LOG_DIR"
+  golog="$IMMICH_GO_LOG_DIR/immich-go_$(date +%F_%H-%M-%S).log"
+  args+=(--log-file="$golog")
+  out=$(mktemp)
+  start=$(date +%s)
+  rm -f "$CANCEL_FILE"
+
+  notify "📷 Import gestartet${MODE}: $count Dateien von $label${album:+ → Album \"$album\"}
+Befehle: /status /abbrechen /log"
+
+  # immich-go im Hintergrund starten und sein Log live ins Skript-Log spiegeln;
+  # tail endet von selbst, sobald immich-go fertig ist.
+  "$IMMICH_GO" "${args[@]}" "${paths[@]}" > "$out" 2>&1 &
+  pid=$!
+  # Status für bot.sh und progress_watch
+  PID=$pid OUT=$out GOLOG=$golog LABEL=$label TOTAL=$count START=$start
+  printf 'PID=%q\nOUT=%q\nGOLOG=%q\nLABEL=%q\nTOTAL=%q\nSTART=%q\nMODE=%q\n' \
+    "$PID" "$OUT" "$GOLOG" "$LABEL" "$TOTAL" "$START" "$MODE" > "$CURRENT_FILE"
+  progress_watch &
+  local wpid=$!
+
+  tail -n +1 -F --pid="$pid" "$golog" 2>/dev/null | sed -u 's/^/  immich-go | /'
+  wait "$pid"
+  rc=$?
+  kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
+  rm -f "$CURRENT_FILE"
+
+  # Zusammenfassung (Standardausgabe) anhängen; die mit \r überschriebene
+  # Fortschrittsanzeige auf ihren letzten Stand kürzen
+  tr '\r' '\n' < "$out" > "$out.clean"
+  mv "$out.clean" "$out"
+  { grep -v '^Immich read' "$out"; grep '^Immich read' "$out" | tail -n1; } \
+    | sed 's/^/  immich-go | /'
+  local dur_txt
+  dur_txt=$(fmt_dur $(( $(date +%s) - start )))
+
+  local up dup err pend
+  up=$(report_value "uploaded successfully" "$out")
+  dup=$(report_value "server has duplicate" "$out")
+  err=$(( $(report_value "upload failed" "$out") + $(report_value "server error" "$out") \
+        + $(report_value "file access error" "$out") ))
+  pend=$(report_value "Pending" "$out")
+  (( DRY_RUN )) && pend=0   # im Probelauf bleiben gestapelte Dateien immer "pending"
+
+  local removable=""
+  release_card && removable=$'\nKarte ausgehängt, kann entfernt werden.'
+
+  local msg
+  if [[ -e "$CANCEL_FILE" ]]; then
+    msg="⏹️ Import abgebrochen ($label): $up neu, $dup schon vorhanden, nach $dur_txt"
+    rm -f "$CANCEL_FILE"
+  elif (( rc == 0 && err == 0 && pend == 0 )); then
+    msg="✅ Import fertig${MODE} ($label): $up neu, $dup schon vorhanden, Dauer $dur_txt"
+  elif (( rc == 0 && err == 0 )); then
+    msg="⚠️ Import unvollständig ($label): $up neu, $dup schon vorhanden, $pend nicht abgeschlossen – Karte bitte erneut einstecken"
+  else
+    msg="❌ Import fehlgeschlagen ($label): Exit $rc, $up neu, $dup vorhanden, $err Fehler
+$(grep -E 'level=(ERROR|WARN)' "$golog" 2>/dev/null | tail -n 5 | cut -c1-300)"
+  fi
+  [[ -n "$album" ]] && msg+=$'\n'"Album: $album"
+  log "${msg%%$'\n'*}"
+  notify "$msg$removable"
+  printf '%s\n%s\n' "$(date '+%F %T')" "$msg" > "$LAST_FILE"
+  rm -f "$out"
+}
+
+# ===== Hauptprogramm =========================================================
+load_config || exit 1
+MODE=""
+(( DRY_RUN )) && MODE=" (Probelauf)"
+
+if [[ ! -x "$IMMICH_GO" ]]; then
+  log "immich-go fehlt – erst camera-import-setup ausführen"
+  notify "❌ Karte erkannt, aber immich-go fehlt. Bitte camera-import-setup ausführen."
+  exit 1
+fi
+
+# Pro Gerät nur ein Aufruf: weitere Auslöser für dieselbe Partition entfallen
+exec 8>"${LOCK_FILE%.lock}-${1:-all}.lock"
+if ! flock -n 8; then
+  log "Import für ${1:-alle} läuft bereits oder wartet schon – übersprungen"
+  exit 0
+fi
+# Verschiedene Karten (z.B. beide Kamera-Schächte) nacheinander importieren
+exec 9>"$LOCK_FILE"
+flock 9
+
+udevadm settle --timeout=30
+sleep 2
+
+if [[ -n "${1:-}" ]]; then
+  is_usb_partition "$1" && import_partition "$1"
+else
+  # Manueller Start: alle USB-Partitionen durchsuchen
+  while read -r kname type; do
+    [[ "$type" == "part" ]] || continue
+    is_usb_partition "$kname" || continue
+    [[ "$(lsblk -no LABEL "/dev/$kname")" == "UNRAID" ]] && continue
+    import_partition "$kname"
+  done < <(lsblk -nr -o KNAME,TYPE)
+fi
+
+check_immich_go_update

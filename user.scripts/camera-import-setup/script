@@ -1,0 +1,66 @@
+#!/bin/bash
+# Installiert bei jedem Array-Start udev-Regel und immich-go neu (das
+# Root-Dateisystem von Unraid liegt im RAM) und startet den Telegram-Bot.
+# Zeitplan in User Scripts: "At Startup of Array"
+
+set -euo pipefail
+
+BASE_DIR="/boot/config/camera-import"
+IMPORT_SCRIPT="/boot/config/plugins/user.scripts/scripts/camera-import/script"
+IMPORT_LOG_DIR="/tmp/user.scripts/tmpScripts/camera-import"
+BOT_PID_FILE="/var/run/camera-import-bot.pid"
+BOT_LOG="/tmp/camera-import/bot.log"
+
+# --- immich-go ---------------------------------------------------------------
+if [[ -f "$BASE_DIR/bin/immich-go" ]]; then
+  install -m 0755 "$BASE_DIR/bin/immich-go" /usr/local/bin/immich-go
+  echo "immich-go installiert: $(/usr/local/bin/immich-go --version 2>&1 | head -n1)"
+else
+  echo "FEHLER: $BASE_DIR/bin/immich-go fehlt – siehe README" >&2
+  exit 1
+fi
+
+if [[ ! -r "$BASE_DIR/camera-import.conf" ]]; then
+  echo "FEHLER: $BASE_DIR/camera-import.conf fehlt – Vorlage camera-import.conf.example kopieren" >&2
+  exit 1
+fi
+
+# --- Trigger-Wrapper ---------------------------------------------------------
+# udev darf nur kurz laufen, deshalb wird der Import per at abgekoppelt.
+cat > /usr/local/bin/camera-import-trigger <<EOF
+#!/bin/bash
+kname="\$1"
+mkdir -p "$IMPORT_LOG_DIR"
+cmd="bash $IMPORT_SCRIPT \$kname >> $IMPORT_LOG_DIR/log.txt 2>&1"
+if command -v at >/dev/null 2>&1; then
+  echo "\$cmd" | at now 2>/dev/null && exit 0
+fi
+setsid nohup bash -c "\$cmd" >/dev/null 2>&1 < /dev/null &
+EOF
+chmod 0755 /usr/local/bin/camera-import-trigger
+
+# --- udev-Regel --------------------------------------------------------------
+# Jede USB-Partition außer dem Unraid-Boot-Stick; ob DCIM vorhanden ist,
+# prüft das Import-Skript selbst.
+cat > /etc/udev/rules.d/99-camera-import.rules <<'EOF'
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_BUS}=="usb", ENV{ID_FS_LABEL}!="UNRAID", ENV{ID_FS_TYPE}=="vfat|exfat|ntfs", RUN+="/usr/local/bin/camera-import-trigger %k"
+EOF
+udevadm control --reload-rules
+echo "udev-Regel installiert: /etc/udev/rules.d/99-camera-import.rules"
+
+# --- Telegram-Bot ------------------------------------------------------------
+if [[ -r "$BOT_PID_FILE" ]] && kill -0 "$(cat "$BOT_PID_FILE")" 2>/dev/null; then
+  pkill -P "$(cat "$BOT_PID_FILE")" 2>/dev/null || true
+  kill "$(cat "$BOT_PID_FILE")" 2>/dev/null || true
+  echo "alter Bot beendet"
+fi
+mkdir -p "$(dirname "$BOT_LOG")"
+setsid nohup bash "$BASE_DIR/bot.sh" >> "$BOT_LOG" 2>&1 < /dev/null &
+echo $! > "$BOT_PID_FILE"
+echo "Telegram-Bot gestartet (PID $(cat "$BOT_PID_FILE"), Log: $BOT_LOG)"
+
+# --- Neue immich-go-Version? -------------------------------------------------
+# shellcheck source=../../boot/camera-import/lib.sh
+source "$BASE_DIR/lib.sh"
+set +eu
+load_config && check_immich_go_update

@@ -1,0 +1,17 @@
+# Einstellungen mit Zugangsdaten – gehören nie ins Repo
+camera-import.conf
+letzter-import.txt
+.immich-go-gemeldet
+
+# Binary, wird von GitHub geladen
+boot/camera-import/bin/immich-go
+*.tar.gz
+
+# Lokal und privat
+.claude/
+.env
+.env.*
+*.bak
+*.bak-*
+*.log
+secrets.*
