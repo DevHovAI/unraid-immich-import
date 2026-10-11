@@ -10,7 +10,7 @@
 //   - keine der beiden Dateien schon in einem Stapel liegt.
 //
 // Aufruf:
-//   php stack.php [--since=JJJJ-MM-TT|ISO-Zeit] [--dry-run] [--conf=PFAD]
+//   php stack.php [--since=JJJJ-MM-TT|ISO-Zeit] [--dry-run] [--conf=PFAD] [--status=DATEI]
 // Ohne --since wird die ganze Bibliothek durchsucht.
 // Letzte Ausgabezeile: "ERGEBNIS paare=N angelegt=N mehrdeutig=N ohnedatum=N fehler=N"
 
@@ -18,7 +18,8 @@ const RAW_EXT = ['arw', 'cr2', 'cr3', 'nef', 'nrw', 'raf', 'dng', 'orf', 'rw2',
                  'pef', 'srw', '3fr', 'iiq', 'erf', 'srf', 'sr2'];
 const DISPLAY_EXT = ['hif', 'heif', 'heic', 'jpg', 'jpeg'];
 
-$opt = getopt('', ['since::', 'dry-run', 'conf::']);
+$opt = getopt('', ['since::', 'dry-run', 'conf::', 'status::']);
+$statusFile = $opt['status'] ?? '';
 $conf = read_conf($opt['conf'] ?? '/boot/config/camera-import/camera-import.conf');
 $url = rtrim($conf['IMMICH_URL'] ?? '', '/');
 $key = $conf['IMMICH_API_KEY'] ?? '';
@@ -56,6 +57,12 @@ function api(string $method, string $path, array $body): array {
         if (preg_match('#^HTTP/\S+\s+(\d+)#', $h, $m)) $status = (int)$m[1];
     }
     return [$status, json_decode($raw ?: 'null', true)];
+}
+
+// Fortschritt für /status in eine Datei schreiben
+function progress(string $text): void {
+    global $statusFile;
+    if ($statusFile !== '') @file_put_contents($statusFile, $text . "\n");
 }
 
 function ext_of(string $name): string {
@@ -126,11 +133,13 @@ while (true) {
     } else {
         break;
     }
+    progress("Bibliothek lesen: $seen Dateien");
     if (++$page % 5 === 0) { echo "… $seen Dateien gelesen\n"; flush(); }
 }
 echo "$seen Dateien gelesen, " . count($groups) . " Dateinamen\n";
 
 // --- Paare bilden -----------------------------------------------------------
+progress("Paare suchen in $seen Dateien …");
 function matches(array $raw, array $img, int $tol): bool {
     if ($raw['t'] === null || $img['t'] === null) return false;
     if (abs($raw['t'] - $img['t']) > $tol) return false;
@@ -166,7 +175,17 @@ foreach ($groups as $files) {
 // --- Stapel anlegen ---------------------------------------------------------
 $created = 0;
 $errors = 0;
-foreach ($pairs as [$primary, $other]) {
+$total = count($pairs);
+$t0 = microtime(true);
+foreach ($pairs as $n => [$primary, $other]) {
+    if (!$dry && $n % 10 === 0) {
+        $line = "Stapel anlegen: $n von $total (" . intdiv(100 * $n, max($total, 1)) . " %)";
+        if ($n >= 20) {
+            $rest = (int)round((microtime(true) - $t0) / $n * ($total - $n) / 60);
+            $line .= $rest < 1 ? ", gleich fertig" : ", noch ca. $rest Min.";
+        }
+        progress($line);
+    }
     if ($dry) {
         echo "würde stapeln: {$primary['name']} + {$other['name']}\n";
         continue;

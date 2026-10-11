@@ -21,6 +21,9 @@ if ! flock -n 7; then
   exit 0
 fi
 
+echo $$ > "$STACK_PID"
+trap 'rm -f "$STACK_PID" "$STACK_PROGRESS"' EXIT
+
 scope="ganze Bibliothek"
 if [[ "$since" == @* ]]; then
   scope="seit $(date -d "$since" '+%F %H:%M')"
@@ -28,7 +31,7 @@ elif [[ -n "$since" ]]; then
   scope="seit $since"
 fi
 
-args=()
+args=(--status="$STACK_PROGRESS")
 [[ -n "$since" ]] && args+=(--since="$since")
 (( DRY_RUN )) && args+=(--dry-run)
 

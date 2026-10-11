@@ -6,7 +6,7 @@
 source "$(dirname "$0")/lib.sh"
 
 HELP="Befehle:
-/status – Fortschritt des laufenden Imports
+/status – Fortschritt von Import und Stapeln
 /abbrechen – laufenden Import stoppen
 /letzter – Zusammenfassung des letzten Imports
 /log – letzte Zeilen des Protokolls
@@ -28,13 +28,16 @@ handle() {
 
   case "$cmd" in
     /status)
+      local s=""
       if import_running; then
-        notify "$(status_text)"
+        s=$(status_text)
       elif [[ -e "$ALBUM_REQUEST" ]]; then
-        notify "⏳ Import wartet auf den Albumnamen."
-      else
-        notify "💤 Kein Import aktiv."
+        s="⏳ Import wartet auf den Albumnamen."
       fi
+      if stack_running; then
+        s+="${s:+$'\n\n'}$(stack_status_text)"
+      fi
+      notify "${s:-💤 Weder Import noch Stapeln aktiv.}"
       ;;
     /abbrechen|/cancel)
       if import_running; then
@@ -90,7 +93,7 @@ main() {
 
   curl -sS -m 15 "https://api.telegram.org/bot${TG_BOT_TOKEN}/setMyCommands" \
     --data-urlencode 'commands=[
-      {"command":"status","description":"Fortschritt des laufenden Imports"},
+      {"command":"status","description":"Fortschritt von Import und Stapeln"},
       {"command":"abbrechen","description":"Laufenden Import stoppen"},
       {"command":"letzter","description":"Zusammenfassung des letzten Imports"},
       {"command":"log","description":"Letzte Zeilen des Protokolls"},

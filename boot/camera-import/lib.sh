@@ -17,6 +17,9 @@ CURRENT_FILE="$STATE_DIR/aktuell.env"
 CANCEL_FILE="$STATE_DIR/abbrechen"
 ALBUM_REQUEST="$STATE_DIR/album-frage"
 ALBUM_ANSWER="$STATE_DIR/album-antwort"
+# Status des Stapel-Laufs (von stack.sh/stack.php geschrieben)
+STACK_PID="$STATE_DIR/stapeln.pid"
+STACK_PROGRESS="$STATE_DIR/stapeln.fortschritt"
 
 load_config() {
   IMMICH_URL="" IMMICH_API_KEY="" TG_BOT_TOKEN="" TG_CHAT_ID=""
@@ -83,6 +86,19 @@ progress() {
   PROG_ERR=$(grep -c ' ERR ' "$GOLOG" 2>/dev/null)
   PROG_DONE=$(( PROG_UP + PROG_DUP ))
   PROG_PCT=$(( TOTAL > 0 ? 100 * PROG_DONE / TOTAL : 0 ))
+}
+
+stack_running() {
+  local pid
+  pid=$(cat "$STACK_PID" 2>/dev/null)
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+stack_status_text() {
+  local since
+  since=$(( $(date +%s) - $(stat -c %Y "$STACK_PID" 2>/dev/null || date +%s) ))
+  echo "🗂️ Stapeln läuft seit $(fmt_dur "$since")
+$(cat "$STACK_PROGRESS" 2>/dev/null || echo "wird gestartet …")"
 }
 
 status_text() {

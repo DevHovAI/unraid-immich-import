@@ -18,7 +18,7 @@ Steckst du eine SD-Karte (über einen USB-Kartenleser) oder eine Kamera an den U
 | ❌ Immich nicht erreichbar | Immich war vor dem Start nicht erreichbar. Der Import wird gar nicht erst begonnen. |
 | ❌ … konnte nicht eingehängt werden | Die Karte ist beschädigt oder hat ein unbekanntes Dateisystem. |
 | ℹ️ immich-go vX ist erschienen | Meldet eine neue Version einmal. Aktualisiert wird nur von Hand. |
-| `/status` | Fortschritt des laufenden Imports |
+| `/status` | Fortschritt von Import und Stapeln |
 | `/abbrechen` | Laufenden Import stoppen |
 | `/letzter` | Zusammenfassung des letzten Imports |
 | `/log` | Letzte Zeilen des Protokolls |
