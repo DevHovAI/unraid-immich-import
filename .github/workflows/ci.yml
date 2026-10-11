@@ -10,10 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Installer aktuell?
+        run: |
+          bash build.sh
+          git diff --exit-code camera-import-install.sh || { echo "camera-import-install.sh veraltet – just build"; exit 1; }
       - name: Syntax
         run: |
-          for f in user.scripts/*/script boot/camera-import/*.sh; do bash -n "$f"; done
+          for f in user.scripts/*/script boot/camera-import/*.sh camera-import-install.sh; do bash -n "$f"; done
       - name: shellcheck
-        run: shellcheck -x -P SCRIPTDIR user.scripts/*/script boot/camera-import/*.sh
+        run: shellcheck -x -P SCRIPTDIR user.scripts/*/script boot/camera-import/*.sh camera-import-install.sh
       - name: PHP-Syntax
         run: php -l boot/camera-import/stack.php

@@ -4,8 +4,8 @@
 # Wird von udev mit dem Partitionsnamen (z.B. sdb1) aufgerufen; ohne Argument
 # werden alle angeschlossenen USB-Partitionen mit DCIM-Ordner importiert.
 #   script stapeln [JJJJ-MM-TT]   nur RAW+HIF/JPG-Paare stapeln, kein Import
-# Zeitplan in User Scripts: "Schedule Disabled"
-# Einstellungen: /boot/config/camera-import/camera-import.conf
+# Wird von camera-import-install angelegt und bei jedem Lauf überschrieben.
+# Einstellungen: oben im Skript camera-import-install
 
 # shellcheck source=../../boot/camera-import/lib.sh
 source /boot/config/camera-import/lib.sh
@@ -221,8 +221,8 @@ MODE=""
 (( DRY_RUN )) && MODE=" (Probelauf)"
 
 if [[ ! -x "$IMMICH_GO" ]]; then
-  log "immich-go fehlt – erst camera-import-setup ausführen"
-  notify "❌ Karte erkannt, aber immich-go fehlt. Bitte camera-import-setup ausführen."
+  log "immich-go fehlt – erst camera-import-install ausführen"
+  notify "❌ Karte erkannt, aber immich-go fehlt. Bitte camera-import-install ausführen."
   exit 1
 fi
 

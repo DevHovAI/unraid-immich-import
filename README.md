@@ -2,7 +2,7 @@
 
 Steckst du eine SD-Karte (über einen USB-Kartenleser) oder eine Kamera an den Unraid-Server, werden die Fotos und Videos automatisch mit [immich-go](https://github.com/simulot/immich-go) nach [Immich](https://immich.app) hochgeladen. Ein Telegram-Bot meldet den Fortschritt und das Ergebnis.
 
-- Läuft über das Unraid-Plugin **User Scripts**. Ausgelöst wird es beim Einstecken über eine udev-Regel.
+- Ein einziges Skript für das Unraid-Plugin **User Scripts**: einfügen, Einstellungen ausfüllen, ausführen. Ausgelöst wird der Import beim Einstecken über eine udev-Regel.
 - RAW+HIF und RAW+JPG werden gestapelt, auch für früher hochgeladene Bilder (`/stapeln`). Was schon in Immich liegt, wird übersprungen.
 - Die Dateien bleiben auf der Karte. Die Karte wird nur lesend eingehängt.
 - Getestet mit einer Sony-Kamera. Die Karte muss einen `DCIM`-Ordner haben, dann geht jede Kamera. Bei Sony werden zusätzlich die Videos aus `PRIVATE/M4ROOT/CLIP` importiert.
@@ -51,50 +51,30 @@ bash $S stapeln 2026-10-11   # nur seit diesem Tag Hochgeladenes
 php /boot/config/camera-import/stack.php --dry-run   # nur anzeigen, nichts ändern
 ```
 
-## Aufbau
-
-```
-boot/camera-import/          →  /boot/config/camera-import/
-  camera-import.conf.example     Vorlage für die Einstellungen
-  lib.sh                         gemeinsame Funktionen
-  bot.sh                         Telegram-Bot (läuft dauerhaft)
-  stack.php, stack.sh            RAW+HIF/JPG-Paare stapeln
-  bin/immich-go                  Binary, nicht im Repo (siehe bin/README.md)
-user.scripts/                →  /boot/config/plugins/user.scripts/scripts/
-  camera-import/                 der Import ("Schedule Disabled")
-  camera-import-setup/           udev-Regel, immich-go, Bot ("At Startup of Array")
-```
-
-Ablauf: Einstecken → udev → `camera-import-trigger` → `at now` → `camera-import/script sdX1` → einhängen → `DCIM`-Ordner vorhanden? → Immich erreichbar? → nach dem Album fragen → immich-go → Telegram → aushängen.
-
-Das Root-Dateisystem von Unraid liegt im RAM. `camera-import-setup` legt deshalb bei jedem Array-Start die udev-Regel, den Trigger-Wrapper und immich-go neu an und startet den Bot.
-
 ## Einrichtung
 
-1. Das Plugin **User Scripts** installieren (Apps → „User Scripts“).
-2. Die Dateien kopieren:
-   ```bash
-   scp -r boot/camera-import root@tower:/boot/config/
-   scp -r user.scripts/* root@tower:/boot/config/plugins/user.scripts/scripts/
-   ```
-3. immich-go nach `/boot/config/camera-import/bin/` legen, siehe [bin/README.md](boot/camera-import/bin/README.md).
-4. Die Einstellungen anlegen:
-   ```bash
-   cd /boot/config/camera-import
-   cp camera-import.conf.example camera-import.conf
-   nano camera-import.conf
-   ```
-5. **Immich-API-Key**: Immich → Kontoeinstellungen → API-Schlüssel → Neuer Schlüssel. Leg ihn mit dem Konto an, in dessen Bibliothek die Bilder landen sollen. Er braucht diese Rechte:
-   `asset.read`, `asset.statistics`, `asset.update`, `asset.upload`, `asset.copy`, `asset.delete`, `asset.download`, `album.create`, `album.read`, `albumAsset.create`, `server.about`, `stack.create`, `tag.asset`, `tag.create`, `user.read`.
-   Diese Rechte verlangt immich-go v0.32.0. Der Stapel-Schritt kommt mit `asset.read` und `stack.create` aus.
-   `job.*` und einen Admin-Schlüssel braucht es nicht, weil das Skript `--pause-immich-jobs=false` setzt.
-6. **Telegram-Bot**:
-   - Bei `@BotFather` mit `/newbot` einen Bot anlegen und den Token notieren.
-   - Den Bot über den Link `t.me/<benutzername>` öffnen. Neue Bots findet die Suche oft nicht.
-   - **Start** tippen und eine Nachricht schicken.
-   - `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"` aufrufen. Die Zahl bei `"chat":{"id":…}` ist `TG_CHAT_ID`. Das ist nicht die Zahl vor dem Doppelpunkt im Token, das wäre die ID des Bots selbst.
-7. Die Zeitpläne in User Scripts setzen: `camera-import-setup` auf **At Startup of Array** und einmal **Run Script** klicken. `camera-import` auf **Schedule Disabled**.
-8. Für den ersten Test `DRY_RUN=1` setzen. Dann wird nichts hochgeladen.
+Voraussetzung ist das Plugin **User Scripts** (Apps → „User Scripts“). Alles Weitere passiert in der Unraid-Oberfläche:
+
+1. Settings → User Scripts → **Add New Script**, Name `camera-import-install`.
+2. Zahnrad → **Edit Script**. Den kompletten Inhalt von [`camera-import-install.sh`](camera-import-install.sh) hineinkopieren.
+3. Oben im Skript die Einstellungen ausfüllen: Immich-Adresse, API-Key, Telegram-Token und Chat-ID. **Save Changes**.
+4. Den Zeitplan auf **At Startup of Array** stellen und auf **Run Script** klicken.
+
+Das Skript lädt immich-go herunter, legt das User Script `camera-import` für den eigentlichen Import an, richtet den Auslöser beim Einstecken ein und startet den Telegram-Bot. Am Ende prüft es Immich und den API-Key und schickt eine Testnachricht. Was nicht stimmt, steht im Log mit ⚠.
+
+**Einstellung ändern**, z.B. einen neuen API-Key: oben im Skript ändern, speichern, **Run Script**.
+
+**Neue Version einspielen**: den Inhalt des Skripts komplett durch die neue `camera-import-install.sh` ersetzen, speichern, **Run Script**. Deine bisherigen Einstellungen übernimmt es dabei automatisch.
+
+**immich-go aktualisieren**: `IMMICH_GO_VERSION` oben im Skript ändern, **Run Script**.
+
+### Was du für die Einstellungen brauchst
+
+- **API-Key**: Immich → Kontoeinstellungen → API-Schlüssel → Neuer Schlüssel, mit dem Konto, in dessen Bibliothek die Bilder landen sollen. Am einfachsten mit allen Rechten. Mindestens nötig sind:
+  `asset.read`, `asset.statistics`, `asset.update`, `asset.upload`, `asset.copy`, `asset.delete`, `asset.download`, `album.create`, `album.read`, `albumAsset.create`, `server.about`, `stack.create`, `tag.asset`, `tag.create`, `user.read`.
+- **Telegram-Bot**: bei `@BotFather` mit `/newbot` anlegen, Token notieren. Den Bot über `t.me/<benutzername>` öffnen (die Suche findet neue Bots oft nicht), **Start** tippen und eine Nachricht schicken. Dann `https://api.telegram.org/bot<TOKEN>/getUpdates` im Browser öffnen: Die Zahl bei `"chat":{"id":…}` ist `TG_CHAT_ID`. Nicht die Zahl vor dem Doppelpunkt im Token, das wäre der Bot selbst.
+
+Für einen ersten Test `DRY_RUN="1"` setzen, dann wird nichts hochgeladen.
 
 ## Kamera direkt anschließen (Sony)
 
@@ -111,12 +91,14 @@ Im Kameramenü die USB-Verbindung auf **Massenspeicher (MSC)** stellen. Steht do
 - Import von Hand für eine Partition: `bash /boot/config/plugins/user.scripts/scripts/camera-import/script sdX1`
 - Nur stapeln: `bash /boot/config/plugins/user.scripts/scripts/camera-import/script stapeln`
 
-Ändere die Skripte nicht, solange ein Import läuft. Bash liest ein Skript während der Ausführung nach, und ein laufender Import kann dabei durcheinanderkommen.
+`camera-import-install` wartet nicht auf einen laufenden Import, sondern bricht ab und sagt Bescheid. Dann nach dem Import noch einmal **Run Script**.
 
 ## Entwicklung
 
+Die Programmteile liegen einzeln in `boot/camera-import/` und `user.scripts/camera-import/`, die Einstellungen und die Installationslogik in `installer/`. `build.sh` setzt daraus `camera-import-install.sh` zusammen. Die Datei ist im Repo, damit man sie direkt kopieren kann; die CI prüft, dass sie aktuell ist.
+
 ```bash
-just check     # bash -n und shellcheck für alle Skripte
+just check     # bauen, bash -n und shellcheck für alle Skripte
 ```
 
 ## Lizenz

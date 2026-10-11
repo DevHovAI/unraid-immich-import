@@ -4,7 +4,7 @@ letzter-import.txt
 .immich-go-gemeldet
 
 # Binary, wird von GitHub geladen
-boot/camera-import/bin/immich-go
+boot/camera-import/bin/
 *.tar.gz
 
 # Lokal und privat

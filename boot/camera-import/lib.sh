@@ -25,10 +25,10 @@ load_config() {
   PROGRESS_STEPS="25 50 75" CHECK_UPDATES=1
   STACK_PAIRS=1 STACK_COVER="display" STACK_TOLERANCE=2
   if [[ ! -r "$CONF_FILE" ]]; then
-    log "Konfiguration fehlt: $CONF_FILE (Vorlage: camera-import.conf.example)"
+    log "Konfiguration fehlt: $CONF_FILE – Skript camera-import-install ausführen"
     return 1
   fi
-  # shellcheck source=camera-import.conf.example
+  # shellcheck source=/dev/null
   source "$CONF_FILE"
   IMMICH_URL="${IMMICH_URL%/}"
   mkdir -p "$STATE_DIR"
@@ -106,7 +106,7 @@ check_immich_go_update() {
   [[ "$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n1)" == "$latest" ]] || return 0
   [[ "$(cat "$UPDATE_STAMP" 2>/dev/null)" == "$latest" ]] && return 0
   notify "ℹ️ immich-go v$latest ist erschienen (installiert: v$installed).
-Aktualisieren: neue Binary nach $BASE_DIR/bin/ legen und camera-import-setup ausführen.
+Aktualisieren: im Skript camera-import-install IMMICH_GO_VERSION=\"$latest\" setzen und Run Script klicken (vorher Release-Notes lesen).
 https://github.com/simulot/immich-go/releases/tag/v$latest"
   echo "$latest" > "$UPDATE_STAMP"
 }

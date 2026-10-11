@@ -1,6 +1,6 @@
 #!/bin/bash
 # Telegram-Bot für camera-import: beantwortet Befehle und nimmt den
-# Albumnamen entgegen. Läuft dauerhaft, gestartet von camera-import-setup.
+# Albumnamen entgegen. Läuft dauerhaft, gestartet von camera-import-install.
 
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
