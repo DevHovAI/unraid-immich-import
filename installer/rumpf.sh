@@ -23,7 +23,7 @@ KEYS=(IMMICH_URL IMMICH_API_KEY TG_BOT_TOKEN TG_CHAT_ID ALBUM_MODE IMMICH_ALBUM
 
 ok()   { echo "  ✔ $*"; }
 warn() { echo "  ⚠ $*"; WARNINGS+=("$*"); }
-die()  { echo; echo "FEHLER: $*"; exit 1; }
+die()  { echo; echo "FEHLER: $*"; [[ -e "$BOT_PID_FILE" ]] || start_bot >/dev/null; exit 1; }
 WARNINGS=()
 
 # Dieses Skript auf dem USB-Stick (für das Zurückschreiben der Einstellungen)
@@ -120,9 +120,10 @@ stop_bot() {
 }
 
 start_bot() {
-  if [[ -z "$TG_BOT_TOKEN" ]]; then return 0; fi
+  [[ -r "$BASE_DIR/bot.sh" ]] || return 0
   mkdir -p "$(dirname "$BOT_LOG")"
-  setsid nohup bash "$BASE_DIR/bot.sh" >> "$BOT_LOG" 2>&1 < /dev/null &
+  # 9>&-: der Bot darf die Import-Sperre nicht erben, sonst hält er sie für immer
+  setsid nohup bash "$BASE_DIR/bot.sh" >> "$BOT_LOG" 2>&1 < /dev/null 9>&- &
   echo $! > "$BOT_PID_FILE"
   ok "Telegram-Bot läuft"
 }
@@ -216,10 +217,16 @@ check_schedule() {
 main() {
   local own msg
 
-  # Einen Import nicht mittendrin umbauen
+  # Einen Import nicht mittendrin umbauen. Den Bot vorher anhalten: ein von
+  # einer älteren Version gestarteter Bot hält die Sperre fälschlich fest.
+  stop_bot
+  sleep 1
   exec 9>"$LOCK_FILE"
   if ! flock -n 9; then
     echo "Gerade läuft ein Import. Bitte danach noch einmal „Run Script“ klicken."
+    echo "Prozesse mit der Sperre:"
+    fuser -v "$LOCK_FILE" 2>&1 | sed 's/^/  /'
+    start_bot >/dev/null
     exit 1
   fi
 
@@ -232,12 +239,11 @@ main() {
   check_settings
   write_conf
   write_back
-  stop_bot
   install_files
   install_immich_go
   install_trigger
   check_immich
-  start_bot
+  if [[ -n "$TG_BOT_TOKEN" ]]; then start_bot; fi
   own=$(own_file)
   check_schedule "$own"
 

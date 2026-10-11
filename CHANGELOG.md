@@ -18,6 +18,7 @@
 - Eigener Stapel-Schritt für RAW+HIF/JPG-Paare (Name, Aufnahmezeit, Kamera), auch für ältere Bilder per /stapeln
 
 ### Behoben
+- Der vom Installationsskript gestartete Bot erbte die Import-Sperre: neue Importe warteten endlos, das Installationsskript meldete „Gerade läuft ein Import“
 - Das Installationsskript löschte sich selbst, wenn es in das alte Skript camera-import-setup eingefügt wurde
 - /stapeln startete nach einem Neustart nicht, solange noch kein Import gelaufen war (Log-Ordner fehlte)
 - Stapeln bricht ab, statt endlos zu laufen, wenn Immich beim Blättern dieselben Bilder erneut liefert
