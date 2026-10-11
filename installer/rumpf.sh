@@ -3,11 +3,15 @@
 
 # Von einer Kopie laufen: das Skript schreibt unten seine eigenen Einstellungen
 # zurück, und bash liest eine Datei während der Ausführung nach.
-if [[ "${CAMERA_IMPORT_KOPIE:-}" != 1 && -f "$0" ]]; then
-  kopie=$(mktemp)
+# Erkannt am Pfad, nicht an einer Umgebungsvariable: die würden Bot und
+# /update erben, und ein neues Installationsskript liefe dann direkt aus der
+# Datei, die es gerade umschreibt.
+if [[ "$0" != /tmp/camera-import-install.* && -f "$0" ]]; then
+  kopie=$(mktemp /tmp/camera-import-install.XXXXXX)
   cp "$0" "$kopie"
-  CAMERA_IMPORT_KOPIE=1 exec bash "$kopie" "$@"
+  exec bash "$kopie" "$@"
 fi
+[[ "$0" == /tmp/camera-import-install.* ]] && trap 'rm -f "$0"' EXIT
 
 BASE_DIR="/boot/config/camera-import"
 CONF_FILE="$BASE_DIR/camera-import.conf"
@@ -228,6 +232,14 @@ main() {
     echo "Prozesse mit der Sperre:"
     exec 9>&-   # damit dieses Skript selbst nicht in der Liste steht
     fuser -v "$LOCK_FILE" 2>&1 | sed 's/^/  /'
+    start_bot >/dev/null
+    exit 1
+  fi
+
+  # Auch kein laufendes Stapeln umbauen
+  if [[ -e /tmp/camera-import/stapeln.lock ]] && ! flock -n /tmp/camera-import/stapeln.lock true; then
+    echo "Gerade läuft das Stapeln. Bitte danach noch einmal „Run Script“ klicken (Stand: /status im Bot)."
+    exec 9>&-
     start_bot >/dev/null
     exit 1
   fi

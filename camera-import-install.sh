@@ -84,17 +84,21 @@ declare -A VORLAGE_WERTE=(
   [IMMICH_GO_VERSION]="0.32.0"
   [CHECK_UPDATES]="1"
 )
-CAMERA_IMPORT_VERSION="1.0.1"
+CAMERA_IMPORT_VERSION="1.0.2"
 
 # ============== AB HIER NICHTS ÄNDERN – Installationslogik ===================
 
 # Von einer Kopie laufen: das Skript schreibt unten seine eigenen Einstellungen
 # zurück, und bash liest eine Datei während der Ausführung nach.
-if [[ "${CAMERA_IMPORT_KOPIE:-}" != 1 && -f "$0" ]]; then
-  kopie=$(mktemp)
+# Erkannt am Pfad, nicht an einer Umgebungsvariable: die würden Bot und
+# /update erben, und ein neues Installationsskript liefe dann direkt aus der
+# Datei, die es gerade umschreibt.
+if [[ "$0" != /tmp/camera-import-install.* && -f "$0" ]]; then
+  kopie=$(mktemp /tmp/camera-import-install.XXXXXX)
   cp "$0" "$kopie"
-  CAMERA_IMPORT_KOPIE=1 exec bash "$kopie" "$@"
+  exec bash "$kopie" "$@"
 fi
+[[ "$0" == /tmp/camera-import-install.* ]] && trap 'rm -f "$0"' EXIT
 
 BASE_DIR="/boot/config/camera-import"
 CONF_FILE="$BASE_DIR/camera-import.conf"
@@ -315,6 +319,14 @@ main() {
     echo "Prozesse mit der Sperre:"
     exec 9>&-   # damit dieses Skript selbst nicht in der Liste steht
     fuser -v "$LOCK_FILE" 2>&1 | sed 's/^/  /'
+    start_bot >/dev/null
+    exit 1
+  fi
+
+  # Auch kein laufendes Stapeln umbauen
+  if [[ -e /tmp/camera-import/stapeln.lock ]] && ! flock -n /tmp/camera-import/stapeln.lock true; then
+    echo "Gerade läuft das Stapeln. Bitte danach noch einmal „Run Script“ klicken (Stand: /status im Bot)."
+    exec 9>&-
     start_bot >/dev/null
     exit 1
   fi
@@ -970,28 +982,33 @@ put "$BASE_DIR/update.sh" <<'__CAMERA_IMPORT_EOF__'
 # übernimmt das Installationsskript selbst aus der bisherigen Konfiguration.
 # Gestartet vom Bot mit /update.
 
-# shellcheck source=lib.sh
-source "$(dirname "$0")/lib.sh"
-load_config || exit 1
+# Alles steht in main(): bash liest ein Skript während der Ausführung nach, und
+# das Installationsskript überschreibt auch diese Datei.
+main() {
+  # shellcheck source=lib.sh
+  source "$(dirname "$0")/lib.sh"
+  load_config || exit 1
 
-fail() { log "Update fehlgeschlagen: $*"; notify "❌ Update fehlgeschlagen: $*"; exit 1; }
+  fail() { log "Update fehlgeschlagen: $*"; notify "❌ Update fehlgeschlagen: $*"; exit 1; }
 
-own=$(installer_file) || fail "Installationsskript in User Scripts nicht gefunden."
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
-curl -fsSL -m 120 "https://github.com/$REPO/releases/latest/download/camera-import-install.sh" -o "$tmp" \
-  || fail "Download von GitHub fehlgeschlagen."
-if ! grep -qx '# camera-import-installer' "$tmp" || ! bash -n "$tmp"; then
-  fail "Die heruntergeladene Datei ist kein gültiges Installationsskript."
-fi
+  own=$(installer_file) || fail "Installationsskript in User Scripts nicht gefunden."
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  curl -fsSL -m 120 "https://github.com/$REPO/releases/latest/download/camera-import-install.sh" -o "$tmp" \
+    || fail "Download von GitHub fehlgeschlagen."
+  if ! grep -qx '# camera-import-installer' "$tmp" || ! bash -n "$tmp"; then
+    fail "Die heruntergeladene Datei ist kein gültiges Installationsskript."
+  fi
 
-cp "$tmp" "$own"   # /boot ist FAT: cp statt mv
-log "Update: $own ersetzt, wird ausgeführt"
-ilog="/tmp/user.scripts/tmpScripts/$(basename "$(dirname "$own")")/log.txt"
-mkdir -p "$(dirname "$ilog")"
-# Das Installationsskript beendet und startet den Bot neu und meldet sich
-# selbst mit ✅ und der neuen Version.
-bash "$own" >> "$ilog" 2>&1 || fail "Installationsskript meldet einen Fehler, siehe Log von camera-import-install."
+  cp "$tmp" "$own"   # /boot ist FAT: cp statt mv
+  log "Update: $own ersetzt, wird ausgeführt"
+  ilog="/tmp/user.scripts/tmpScripts/$(basename "$(dirname "$own")")/log.txt"
+  mkdir -p "$(dirname "$ilog")"
+  # Das Installationsskript beendet und startet den Bot neu und meldet sich
+  # selbst mit ✅ und der neuen Version.
+  env -u CAMERA_IMPORT_KOPIE bash "$own" >> "$ilog" 2>&1 || fail "Installationsskript meldet einen Fehler, siehe Log von camera-import-install."
+}
+main "$@"; exit $?
 __CAMERA_IMPORT_EOF__
 put "$IMPORT_DIR/script" <<'__CAMERA_IMPORT_EOF__'
 #!/bin/bash

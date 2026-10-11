@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.2] – 2026-10-12
+
+### Behoben
+- /update brach mit „syntax error“ ab: das neue Installationsskript lief direkt aus der Datei, die es gerade umschrieb
+
 ## [1.0.1] – 2026-10-12
 
 ### Geändert
