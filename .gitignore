@@ -15,3 +15,10 @@ boot/camera-import/bin/
 *.bak-*
 *.log
 secrets.*
+
+# Editor-Sicherungen (Kate, vim, emacs) – können Einstellungen mit Zugangsdaten enthalten
+*.kate-swp
+*.swp
+*.swo
+*~
+.#*
