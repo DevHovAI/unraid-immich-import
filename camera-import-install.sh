@@ -198,9 +198,10 @@ write_back() {
 stop_bot() {
   local pid
   pid=$(cat "$BOT_PID_FILE" 2>/dev/null)
+  # Der Bot läuft per setsid in einer eigenen Prozessgruppe: die ganze Gruppe
+  # beenden, sonst bleiben curl/php aus der laufenden Telegram-Abfrage übrig
   if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-    pkill -P "$pid" 2>/dev/null
-    kill "$pid" 2>/dev/null
+    kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null
   fi
   rm -f "$BOT_PID_FILE"
 }
@@ -306,11 +307,11 @@ main() {
   # Einen Import nicht mittendrin umbauen. Den Bot vorher anhalten: ein von
   # einer älteren Version gestarteter Bot hält die Sperre fälschlich fest.
   stop_bot
-  sleep 1
   exec 9>"$LOCK_FILE"
-  if ! flock -n 9; then
+  if ! flock -w 5 9; then
     echo "Gerade läuft ein Import. Bitte danach noch einmal „Run Script“ klicken."
     echo "Prozesse mit der Sperre:"
+    exec 9>&-   # damit dieses Skript selbst nicht in der Liste steht
     fuser -v "$LOCK_FILE" 2>&1 | sed 's/^/  /'
     start_bot >/dev/null
     exit 1
