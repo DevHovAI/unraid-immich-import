@@ -3,7 +3,7 @@
 Steckst du eine SD-Karte (über einen USB-Kartenleser) oder eine Kamera an den Unraid-Server, werden die Fotos und Videos automatisch mit [immich-go](https://github.com/simulot/immich-go) nach [Immich](https://immich.app) hochgeladen. Ein Telegram-Bot meldet den Fortschritt und das Ergebnis.
 
 - Läuft über das Unraid-Plugin **User Scripts**. Ausgelöst wird es beim Einstecken über eine udev-Regel.
-- RAW+JPG werden gestapelt. Was schon in Immich liegt, wird übersprungen.
+- RAW+HIF und RAW+JPG werden gestapelt, auch für früher hochgeladene Bilder (`/stapeln`). Was schon in Immich liegt, wird übersprungen.
 - Die Dateien bleiben auf der Karte. Die Karte wird nur lesend eingehängt.
 - Getestet mit einer Sony-Kamera. Die Karte muss einen `DCIM`-Ordner haben, dann geht jede Kamera. Bei Sony werden zusätzlich die Videos aus `PRIVATE/M4ROOT/CLIP` importiert.
 
@@ -22,9 +22,33 @@ Steckst du eine SD-Karte (über einen USB-Kartenleser) oder eine Kamera an den U
 | `/abbrechen` | Laufenden Import stoppen |
 | `/letzter` | Zusammenfassung des letzten Imports |
 | `/log` | Letzte Zeilen des Protokolls |
+| `/stapeln` | RAW+HIF/JPG-Paare der ganzen Bibliothek stapeln |
+| `/stapeln JJJJ-MM-TT` | nur, was seit diesem Tag hochgeladen wurde |
+| 🗂️ Stapeln … | Ergebnis des Stapel-Laufs nach jedem Import |
 | `/hilfe` | Alle Befehle |
 
 Der Bot reagiert nur auf Nachrichten aus dem eingetragenen Chat (`TG_CHAT_ID`).
+
+## Stapeln
+
+immich-go stapelt nur RAW+JPG. Sonys HIF+ARW-Paare stapelt es nicht. Deshalb folgt nach jedem Import ein eigener Schritt (`stack.php`), der direkt mit der Schnittstelle von Immich arbeitet. Zwei Dateien kommen nur dann in einen Stapel, wenn alles davon zutrifft:
+
+- Der Dateiname ohne Endung ist gleich, zum Beispiel `DSC01234.ARW` und `DSC01234.HIF`.
+- Die Aufnahmezeiten liegen höchstens `STACK_TOLERANCE` Sekunden auseinander (Standard 2).
+- Das Kameramodell ist gleich, sofern beide Dateien eines haben.
+- Die Zuordnung ist eindeutig. Gibt es zum Beispiel HIF, JPG und ARW mit demselben Namen, wird nichts gestapelt.
+- Keine der beiden Dateien liegt schon in einem Stapel.
+
+Vorne liegt standardmäßig das HIF bzw. JPG (`STACK_COVER="display"`). Mit `raw` liegt das RAW vorne.
+
+Das Aufnahmedatum liest Immich erst im Metadaten-Job aus, also kurz nach dem Upload. Fehlt es noch, versucht das Skript es nach 30 Minuten erneut, höchstens dreimal. Danach geht es von Hand mit `/stapeln`.
+
+Ohne Telegram:
+```bash
+php /boot/config/camera-import/stack.php --dry-run          # nur anzeigen
+php /boot/config/camera-import/stack.php --since=2026-10-11
+php /boot/config/camera-import/stack.php                    # ganze Bibliothek
+```
 
 ## Aufbau
 
@@ -33,6 +57,7 @@ boot/camera-import/          →  /boot/config/camera-import/
   camera-import.conf.example     Vorlage für die Einstellungen
   lib.sh                         gemeinsame Funktionen
   bot.sh                         Telegram-Bot (läuft dauerhaft)
+  stack.php, stack.sh            RAW+HIF/JPG-Paare stapeln
   bin/immich-go                  Binary, nicht im Repo (siehe bin/README.md)
 user.scripts/                →  /boot/config/plugins/user.scripts/scripts/
   camera-import/                 der Import ("Schedule Disabled")
@@ -60,6 +85,7 @@ Das Root-Dateisystem von Unraid liegt im RAM. `camera-import-setup` legt deshalb
    ```
 5. **Immich-API-Key**: Immich → Kontoeinstellungen → API-Schlüssel → Neuer Schlüssel. Leg ihn mit dem Konto an, in dessen Bibliothek die Bilder landen sollen. Er braucht diese Rechte:
    `asset.read`, `asset.statistics`, `asset.update`, `asset.upload`, `asset.copy`, `asset.delete`, `asset.download`, `album.create`, `album.read`, `albumAsset.create`, `server.about`, `stack.create`, `tag.asset`, `tag.create`, `user.read`.
+   Diese Rechte verlangt immich-go v0.32.0. Der Stapel-Schritt kommt mit `asset.read` und `stack.create` aus.
    `job.*` und einen Admin-Schlüssel braucht es nicht, weil das Skript `--pause-immich-jobs=false` setzt.
 6. **Telegram-Bot**:
    - Bei `@BotFather` mit `/newbot` einen Bot anlegen und den Token notieren.

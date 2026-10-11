@@ -10,6 +10,8 @@ HELP="Befehle:
 /abbrechen – laufenden Import stoppen
 /letzter – Zusammenfassung des letzten Imports
 /log – letzte Zeilen des Protokolls
+/stapeln – RAW+HIF/JPG-Paare der ganzen Bibliothek stapeln
+/stapeln JJJJ-MM-TT – nur seit diesem Tag Hochgeladenes
 /kein – beim Albumnamen: kein Album"
 
 handle() {
@@ -60,6 +62,16 @@ $(tr '\r' '\n' < "$file" | grep -v '^Immich read' | tail -n 15 | cut -c1-250)"
         notify "Kein Protokoll vorhanden."
       fi
       ;;
+    /stapeln)
+      local arg=""
+      [[ "$text" == *" "* ]] && arg="${text#* }"
+      if [[ -n "$arg" ]] && ! date -d "$arg" >/dev/null 2>&1; then
+        notify "Unbekanntes Datum: $arg (Format JJJJ-MM-TT)"
+        return
+      fi
+      notify "🗂️ Stapeln gestartet (${arg:-ganze Bibliothek}) …"
+      setsid bash "$BASE_DIR/stack.sh" "$arg" 0 >> "$SCRIPT_LOG" 2>&1 < /dev/null &
+      ;;
     /kein)
       if [[ -e "$ALBUM_REQUEST" ]]; then
         echo "-" > "$ALBUM_ANSWER"
@@ -82,6 +94,7 @@ main() {
       {"command":"abbrechen","description":"Laufenden Import stoppen"},
       {"command":"letzter","description":"Zusammenfassung des letzten Imports"},
       {"command":"log","description":"Letzte Zeilen des Protokolls"},
+      {"command":"stapeln","description":"RAW+HIF/JPG-Paare stapeln (optional: ab Datum)"},
       {"command":"hilfe","description":"Alle Befehle"}]' >/dev/null 2>&1
 
   # Nachrichten von vor dem Start überspringen

@@ -15,3 +15,5 @@ jobs:
           for f in user.scripts/*/script boot/camera-import/*.sh; do bash -n "$f"; done
       - name: shellcheck
         run: shellcheck -x -P SCRIPTDIR user.scripts/*/script boot/camera-import/*.sh
+      - name: PHP-Syntax
+        run: php -l boot/camera-import/stack.php

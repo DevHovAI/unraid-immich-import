@@ -12,3 +12,7 @@
 - Meldung, wenn die Karte nicht eingehängt werden kann oder immich-go fehlt
 - Automatisches Aushängen von Karten, die Unassigned Devices eingehängt hat
 - Hinweis auf neue immich-go-Versionen
+- Eigener Stapel-Schritt für RAW+HIF/JPG-Paare (Name, Aufnahmezeit, Kamera), auch für ältere Bilder per /stapeln
+
+### Behoben
+- /status und Fehlermeldungen lesen das Protokollformat von immich-go richtig (INF/ERR statt level=…)

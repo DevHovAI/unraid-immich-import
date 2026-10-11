@@ -23,6 +23,7 @@ load_config() {
   ALBUM_MODE="none" IMMICH_ALBUM="" ALBUM_ASK_TIMEOUT=120
   RAW_JPEG="StackCoverJPG" DRY_RUN=0 AUTO_UNMOUNT=1
   PROGRESS_STEPS="25 50 75" CHECK_UPDATES=1
+  STACK_PAIRS=1 STACK_COVER="display" STACK_TOLERANCE=2
   if [[ ! -r "$CONF_FILE" ]]; then
     log "Konfiguration fehlt: $CONF_FILE (Vorlage: camera-import.conf.example)"
     return 1
@@ -75,10 +76,10 @@ progress() {
   local up dup
   up=$(tail -c 500 "$OUT" 2>/dev/null | tr '\r' '\n' | grep '^Immich read' | tail -n1 \
        | sed -nE 's/.*Uploaded ([0-9]+).*/\1/p')
-  dup=$(grep -c 'msg="server has duplicate"' "$GOLOG" 2>/dev/null)
+  dup=$(grep -c ' INF server has duplicate' "$GOLOG" 2>/dev/null)
   PROG_UP=${up:-0}
   PROG_DUP=${dup:-0}
-  PROG_ERR=$(grep -c 'level=ERROR' "$GOLOG" 2>/dev/null)
+  PROG_ERR=$(grep -c ' ERR ' "$GOLOG" 2>/dev/null)
   PROG_DONE=$(( PROG_UP + PROG_DUP ))
   PROG_PCT=$(( TOTAL > 0 ? 100 * PROG_DONE / TOTAL : 0 ))
 }
