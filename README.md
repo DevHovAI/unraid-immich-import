@@ -43,11 +43,12 @@ Vorne liegt standardmäßig das HIF bzw. JPG (`STACK_COVER="display"`). Mit `raw
 
 Das Aufnahmedatum liest Immich erst im Metadaten-Job aus, also kurz nach dem Upload. Fehlt es noch, versucht das Skript es nach 30 Minuten erneut, höchstens dreimal. Danach geht es von Hand mit `/stapeln`.
 
-Ohne Telegram:
+Von Hand in der Konsole (Ergebnis kommt zusätzlich per Telegram):
 ```bash
-php /boot/config/camera-import/stack.php --dry-run          # nur anzeigen
-php /boot/config/camera-import/stack.php --since=2026-10-11
-php /boot/config/camera-import/stack.php                    # ganze Bibliothek
+S=/boot/config/plugins/user.scripts/scripts/camera-import/script
+bash $S stapeln              # ganze Bibliothek
+bash $S stapeln 2026-10-11   # nur seit diesem Tag Hochgeladenes
+php /boot/config/camera-import/stack.php --dry-run   # nur anzeigen, nichts ändern
 ```
 
 ## Aufbau
@@ -108,6 +109,7 @@ Im Kameramenü die USB-Verbindung auf **Massenspeicher (MSC)** stellen. Steht do
 - Ist die udev-Regel aktiv? `cat /etc/udev/rules.d/99-camera-import.rules`
 - Was meldet udev zur Karte? `udevadm info --query=property --name=/dev/sdX1 | grep -E 'ID_BUS|ID_FS'`
 - Import von Hand für eine Partition: `bash /boot/config/plugins/user.scripts/scripts/camera-import/script sdX1`
+- Nur stapeln: `bash /boot/config/plugins/user.scripts/scripts/camera-import/script stapeln`
 
 Ändere die Skripte nicht, solange ein Import läuft. Bash liest ein Skript während der Ausführung nach, und ein laufender Import kann dabei durcheinanderkommen.
 

@@ -3,6 +3,7 @@
 # und meldet das Ergebnis per Telegram.
 # Wird von udev mit dem Partitionsnamen (z.B. sdb1) aufgerufen; ohne Argument
 # werden alle angeschlossenen USB-Partitionen mit DCIM-Ordner importiert.
+#   script stapeln [JJJJ-MM-TT]   nur RAW+HIF/JPG-Paare stapeln, kein Import
 # Zeitplan in User Scripts: "Schedule Disabled"
 # Einstellungen: /boot/config/camera-import/camera-import.conf
 
@@ -211,6 +212,11 @@ $(grep -E ' (ERR|WRN) ' "$golog" 2>/dev/null | tail -n 5 | cut -c1-300)"
 
 # ===== Hauptprogramm =========================================================
 load_config || exit 1
+
+if [[ "${1:-}" == "stapeln" ]]; then
+  exec bash "$BASE_DIR/stack.sh" "${2:-}" 0
+fi
+
 MODE=""
 (( DRY_RUN )) && MODE=" (Probelauf)"
 
