@@ -94,6 +94,10 @@ Im Kameramenü die USB-Verbindung auf **Massenspeicher (MSC)** stellen. Steht do
 
 `camera-import-install` wartet nicht auf einen laufenden Import, sondern bricht ab und sagt Bescheid. Dann nach dem Import noch einmal **Run Script**.
 
+## Entfernen
+
+Im Skript `camera-import-install` `DEINSTALLIEREN="1"` setzen und „Run Script“ klicken. Das entfernt Bot, Auslöser, beide User Scripts und `/boot/config/camera-import`. Die Fotos in Immich bleiben unverändert.
+
 ## Entwicklung
 
 Die Programmteile liegen einzeln in `boot/camera-import/` und `user.scripts/camera-import/`, die Einstellungen und die Installationslogik in `installer/`. `build.sh` setzt daraus `camera-import-install.sh` zusammen. Die Datei ist im Repo, damit man sie direkt kopieren kann; die CI prüft, dass sie aktuell ist.

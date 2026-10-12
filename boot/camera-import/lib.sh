@@ -145,6 +145,8 @@ newer_version() {
   installed=$(installed_version)
   latest=$(latest_version)
   [[ -n "$latest" && "$latest" != "$installed" ]] || return 1
+  # Neue Hauptversion (v2 = Docker-Container) lässt sich nicht per /update installieren
+  [[ "${latest%%.*}" == "${installed%%.*}" ]] || return 1
   [[ "$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n1)" == "$latest" ]] || return 1
   echo "$latest"
 }
@@ -152,7 +154,17 @@ newer_version() {
 # Einmal je neuer Version per Telegram auf /update hinweisen
 check_self_update() {
   (( CHECK_UPDATES )) || return 0
-  local latest
+  local latest installed
+  installed=$(installed_version)
+  latest=$(latest_version)
+  if [[ -n "$latest" && "${latest%%.*}" != "${installed%%.*}" ]] \
+     && [[ "$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n1)" == "$latest" ]]; then
+    [[ "$(cat "$SELF_UPDATE_STAMP" 2>/dev/null)" == "$latest" ]] && return 0
+    notify "🆕 camera-import v$latest ist da – ab v2 als Docker-Container.
+Umstieg (nicht per /update): https://github.com/$REPO#umstieg-auf-v2"
+    echo "$latest" > "$SELF_UPDATE_STAMP"
+    return 0
+  fi
   latest=$(newer_version) || return 0
   [[ "$(cat "$SELF_UPDATE_STAMP" 2>/dev/null)" == "$latest" ]] && return 0
   notify "🆕 camera-import v$latest ist verfügbar (installiert: v$(installed_version)).

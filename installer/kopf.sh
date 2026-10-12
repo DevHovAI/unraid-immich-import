@@ -61,6 +61,11 @@ IMMICH_GO_VERSION="0.32.0"
 # 1 = per Telegram melden, wenn eine neue Version erscheint
 CHECK_UPDATES="1"
 
+# --- Entfernen ---
+# 1 = camera-import komplett vom Server entfernen (z.B. vor dem Umstieg auf den
+# Docker-Container v2), dann „Run Script“. Fotos in Immich bleiben unberührt.
+DEINSTALLIEREN="0"
+
 # Intern, nicht ändern: 1 = frisch eingefügt, bisherige Einstellungen übernehmen
 VORLAGE="1"
 

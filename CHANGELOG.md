@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0] – 2026-10-12
+
+### Hinzugefügt
+- Einstellung `DEINSTALLIEREN="1"`: entfernt camera-import mit „Run Script“ vollständig vom Server (Vorbereitung für den Umstieg auf den Docker-Container v2)
+
+### Geändert
+- Eine neue Hauptversion (v2) bietet der Bot nicht per /update an, sondern weist einmal auf den Umstieg hin
+
 ## [1.0.3] – 2026-10-12
 
 ### Behoben

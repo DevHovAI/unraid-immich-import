@@ -212,6 +212,42 @@ check_immich() {
   esac
 }
 
+uninstall() {
+  local own j
+  echo "camera-import wird entfernt …"
+  if [[ -r "$CONF_FILE" ]]; then
+    # shellcheck source=/dev/null
+    (source "$CONF_FILE"
+     [[ -n "$TG_BOT_TOKEN" && -n "$TG_CHAT_ID" ]] || exit 0
+     curl -sS -m 15 "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+       --data-urlencode "chat_id=${TG_CHAT_ID}" \
+       --data-urlencode "text=🗑️ camera-import wurde vom Server entfernt." >/dev/null 2>&1)
+  fi
+  # Geplante neue Stapel-Versuche löschen
+  if command -v atq >/dev/null 2>&1; then
+    for j in $(atq | awk '{print $1}'); do
+      at -c "$j" 2>/dev/null | grep -q 'camera-import' && atrm "$j"
+    done
+  fi
+  rm -f /etc/udev/rules.d/99-camera-import.rules /usr/local/bin/camera-import-trigger \
+        /usr/local/bin/immich-go
+  udevadm control --reload-rules
+  ok "Auslöser beim Einstecken entfernt"
+  rm -rf "$IMPORT_DIR" "$IMPORT_LOG_DIR" /tmp/camera-import
+  ok "User Script camera-import entfernt"
+  rm -rf "$BASE_DIR"
+  ok "Programmdateien und Einstellungen entfernt ($BASE_DIR)"
+  own=$(own_file)
+  if [[ -n "$own" ]]; then
+    rm -rf "$(dirname "$own")"
+    ok "Dieses Skript entfernt ($(dirname "$own"))"
+  fi
+  rm -f "$LOCK_FILE"
+  echo
+  echo "Fertig. camera-import ist entfernt; die Seite User Scripts bitte neu laden."
+  echo "Deine Fotos in Immich sind unverändert."
+}
+
 check_schedule() {
   local own="$1"
   [[ -n "$own" ]] || return 0
@@ -242,6 +278,11 @@ main() {
     exec 9>&-
     start_bot >/dev/null
     exit 1
+  fi
+
+  if [[ "${DEINSTALLIEREN:-0}" == 1 ]]; then
+    uninstall
+    exit 0
   fi
 
   if grep -qx '# camera-import-installer' "$IMPORT_DIR/script" 2>/dev/null; then

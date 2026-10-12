@@ -61,6 +61,11 @@ IMMICH_GO_VERSION="0.32.0"
 # 1 = per Telegram melden, wenn eine neue Version erscheint
 CHECK_UPDATES="1"
 
+# --- Entfernen ---
+# 1 = camera-import komplett vom Server entfernen (z.B. vor dem Umstieg auf den
+# Docker-Container v2), dann „Run Script“. Fotos in Immich bleiben unberührt.
+DEINSTALLIEREN="0"
+
 # Intern, nicht ändern: 1 = frisch eingefügt, bisherige Einstellungen übernehmen
 VORLAGE="1"
 
@@ -83,8 +88,9 @@ declare -A VORLAGE_WERTE=(
   [STACK_TOLERANCE]="2"
   [IMMICH_GO_VERSION]="0.32.0"
   [CHECK_UPDATES]="1"
+  [DEINSTALLIEREN]="0"
 )
-CAMERA_IMPORT_VERSION="1.0.3"
+CAMERA_IMPORT_VERSION="1.1.0"
 
 # ============== AB HIER NICHTS ÄNDERN – Installationslogik ===================
 
@@ -299,6 +305,42 @@ check_immich() {
   esac
 }
 
+uninstall() {
+  local own j
+  echo "camera-import wird entfernt …"
+  if [[ -r "$CONF_FILE" ]]; then
+    # shellcheck source=/dev/null
+    (source "$CONF_FILE"
+     [[ -n "$TG_BOT_TOKEN" && -n "$TG_CHAT_ID" ]] || exit 0
+     curl -sS -m 15 "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+       --data-urlencode "chat_id=${TG_CHAT_ID}" \
+       --data-urlencode "text=🗑️ camera-import wurde vom Server entfernt." >/dev/null 2>&1)
+  fi
+  # Geplante neue Stapel-Versuche löschen
+  if command -v atq >/dev/null 2>&1; then
+    for j in $(atq | awk '{print $1}'); do
+      at -c "$j" 2>/dev/null | grep -q 'camera-import' && atrm "$j"
+    done
+  fi
+  rm -f /etc/udev/rules.d/99-camera-import.rules /usr/local/bin/camera-import-trigger \
+        /usr/local/bin/immich-go
+  udevadm control --reload-rules
+  ok "Auslöser beim Einstecken entfernt"
+  rm -rf "$IMPORT_DIR" "$IMPORT_LOG_DIR" /tmp/camera-import
+  ok "User Script camera-import entfernt"
+  rm -rf "$BASE_DIR"
+  ok "Programmdateien und Einstellungen entfernt ($BASE_DIR)"
+  own=$(own_file)
+  if [[ -n "$own" ]]; then
+    rm -rf "$(dirname "$own")"
+    ok "Dieses Skript entfernt ($(dirname "$own"))"
+  fi
+  rm -f "$LOCK_FILE"
+  echo
+  echo "Fertig. camera-import ist entfernt; die Seite User Scripts bitte neu laden."
+  echo "Deine Fotos in Immich sind unverändert."
+}
+
 check_schedule() {
   local own="$1"
   [[ -n "$own" ]] || return 0
@@ -329,6 +371,11 @@ main() {
     exec 9>&-
     start_bot >/dev/null
     exit 1
+  fi
+
+  if [[ "${DEINSTALLIEREN:-0}" == 1 ]]; then
+    uninstall
+    exit 0
   fi
 
   if grep -qx '# camera-import-installer' "$IMPORT_DIR/script" 2>/dev/null; then
@@ -522,6 +569,8 @@ newer_version() {
   installed=$(installed_version)
   latest=$(latest_version)
   [[ -n "$latest" && "$latest" != "$installed" ]] || return 1
+  # Neue Hauptversion (v2 = Docker-Container) lässt sich nicht per /update installieren
+  [[ "${latest%%.*}" == "${installed%%.*}" ]] || return 1
   [[ "$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n1)" == "$latest" ]] || return 1
   echo "$latest"
 }
@@ -529,7 +578,17 @@ newer_version() {
 # Einmal je neuer Version per Telegram auf /update hinweisen
 check_self_update() {
   (( CHECK_UPDATES )) || return 0
-  local latest
+  local latest installed
+  installed=$(installed_version)
+  latest=$(latest_version)
+  if [[ -n "$latest" && "${latest%%.*}" != "${installed%%.*}" ]] \
+     && [[ "$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n1)" == "$latest" ]]; then
+    [[ "$(cat "$SELF_UPDATE_STAMP" 2>/dev/null)" == "$latest" ]] && return 0
+    notify "🆕 camera-import v$latest ist da – ab v2 als Docker-Container.
+Umstieg (nicht per /update): https://github.com/$REPO#umstieg-auf-v2"
+    echo "$latest" > "$SELF_UPDATE_STAMP"
+    return 0
+  fi
   latest=$(newer_version) || return 0
   [[ "$(cat "$SELF_UPDATE_STAMP" 2>/dev/null)" == "$latest" ]] && return 0
   notify "🆕 camera-import v$latest ist verfügbar (installiert: v$(installed_version)).
