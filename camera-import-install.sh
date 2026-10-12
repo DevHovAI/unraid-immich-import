@@ -84,7 +84,7 @@ declare -A VORLAGE_WERTE=(
   [IMMICH_GO_VERSION]="0.32.0"
   [CHECK_UPDATES]="1"
 )
-CAMERA_IMPORT_VERSION="1.0.2"
+CAMERA_IMPORT_VERSION="1.0.3"
 
 # ============== AB HIER NICHTS ÄNDERN – Installationslogik ===================
 
@@ -788,6 +788,8 @@ const RAW_EXT = ['arw', 'cr2', 'cr3', 'nef', 'nrw', 'raf', 'dng', 'orf', 'rw2',
                  'pef', 'srw', '3fr', 'iiq', 'erf', 'srf', 'sr2'];
 const DISPLAY_EXT = ['hif', 'heif', 'heic', 'jpg', 'jpeg'];
 
+require __DIR__ . '/immich.php';
+
 $opt = getopt('', ['since::', 'dry-run', 'conf::', 'status::']);
 $statusFile = $opt['status'] ?? '';
 $conf = read_conf($opt['conf'] ?? '/boot/config/camera-import/camera-import.conf');
@@ -799,34 +801,6 @@ $dry = isset($opt['dry-run']);
 if ($url === '' || $key === '') {
     fwrite(STDERR, "IMMICH_URL oder IMMICH_API_KEY fehlt\n");
     exit(2);
-}
-
-// Einstellungen im Shell-Format (KEY="wert") lesen
-function read_conf(string $path): array {
-    $out = [];
-    foreach (@file($path) ?: [] as $line) {
-        if (preg_match('/^\s*([A-Z_]+)=(["\']?)(.*)\2\s*(#.*)?$/', $line, $m)) {
-            $out[$m[1]] = $m[3];
-        }
-    }
-    return $out;
-}
-
-function api(string $method, string $path, array $body): array {
-    global $url, $key;
-    $ctx = stream_context_create(['http' => [
-        'method' => $method,
-        'header' => "x-api-key: $key\r\nContent-Type: application/json\r\nAccept: application/json\r\n",
-        'content' => json_encode($body),
-        'timeout' => 120,
-        'ignore_errors' => true,
-    ]]);
-    $raw = @file_get_contents($url . '/api' . $path, false, $ctx);
-    $status = 0;
-    foreach ($http_response_header ?? [] as $h) {
-        if (preg_match('#^HTTP/\S+\s+(\d+)#', $h, $m)) $status = (int)$m[1];
-    }
-    return [$status, json_decode($raw ?: 'null', true)];
 }
 
 // Fortschritt für /status in eine Datei schreiben
@@ -975,6 +949,141 @@ printf("ERGEBNIS paare=%d angelegt=%d mehrdeutig=%d ohnedatum=%d fehler=%d\n",
        count($pairs), $created, $ambiguous, $nodate, $errors);
 exit($errors ? 1 : 0);
 __CAMERA_IMPORT_EOF__
+put "$BASE_DIR/immich.php" <<'__CAMERA_IMPORT_EOF__'
+<?php
+// Gemeinsame Helfer für stack.php und album.php: Einstellungen lesen, Immich-API.
+
+// Einstellungen im Shell-Format (KEY="wert") lesen
+function read_conf(string $path): array {
+    $out = [];
+    foreach (@file($path) ?: [] as $line) {
+        if (preg_match('/^\s*([A-Z_]+)=(["\']?)(.*)\2\s*(#.*)?$/', $line, $m)) {
+            $out[$m[1]] = $m[3];
+        }
+    }
+    return $out;
+}
+
+function api(string $method, string $path, ?array $body = null): array {
+    global $url, $key;
+    $http = [
+        'method' => $method,
+        'header' => "x-api-key: $key\r\nContent-Type: application/json\r\nAccept: application/json\r\n",
+        'timeout' => 120,
+        'ignore_errors' => true,
+    ];
+    if ($body !== null) $http['content'] = json_encode($body);
+    $raw = @file_get_contents($url . '/api' . $path, false, stream_context_create(['http' => $http]));
+    $status = 0;
+    foreach ($http_response_header ?? [] as $h) {
+        if (preg_match('#^HTTP/\S+\s+(\d+)#', $h, $m)) $status = (int)$m[1];
+    }
+    return [$status, json_decode($raw ?: 'null', true)];
+}
+__CAMERA_IMPORT_EOF__
+put "$BASE_DIR/album.php" <<'__CAMERA_IMPORT_EOF__'
+<?php
+// Legt nur die bei diesem Import neu hochgeladenen Dateien in ein Album.
+// immich-go --into-album würde auch Dateien einsortieren, die schon vorher in
+// Immich lagen (Duplikate), deshalb erledigt das dieser Schritt danach.
+//
+// Neu = in Immich angelegt seit Importbeginn UND Dateiname kommt auf der Karte vor
+// (so landen gleichzeitige Uploads vom Handy nicht im Album).
+//
+// Aufruf:
+//   php album.php --name=ALBUM --since=@UNIXZEIT --files=LISTE [--conf=PFAD]
+// LISTE: Datei mit einem Dateinamen pro Zeile.
+// Letzte Ausgabezeile: "ERGEBNIS neu=N fehler=N"
+
+require __DIR__ . '/immich.php';
+
+$opt = getopt('', ['name:', 'since:', 'files:', 'conf::']);
+$conf = read_conf($opt['conf'] ?? '/boot/config/camera-import/camera-import.conf');
+$url = rtrim($conf['IMMICH_URL'] ?? '', '/');
+$key = $conf['IMMICH_API_KEY'] ?? '';
+$name = $opt['name'] ?? '';
+$ts = strtotime($opt['since'] ?? '');
+if ($url === '' || $key === '' || $name === '' || $ts === false || empty($opt['files'])) {
+    fwrite(STDERR, "Aufruf: album.php --name=ALBUM --since=@UNIXZEIT --files=LISTE\n");
+    echo "ERGEBNIS neu=0 fehler=1\n";
+    exit(2);
+}
+
+function fail(string $msg): void {
+    fwrite(STDERR, "$msg\n");
+    echo "ERGEBNIS neu=0 fehler=1\n";
+    exit(1);
+}
+
+$names = [];
+foreach (@file($opt['files'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $f) {
+    $names[strtolower(basename($f))] = true;
+}
+
+// --- Neue Dateien suchen ----------------------------------------------------
+$query = ['size' => 1000, 'withStacked' => true,
+          'createdAfter' => gmdate('Y-m-d\TH:i:s.000\Z', $ts)];
+$ids = [];
+$seen = [];
+while (true) {
+    [$status, $res] = api('POST', '/search/metadata', $query);
+    if ($status !== 200 || !isset($res['assets']['items'])) {
+        fail("Suche fehlgeschlagen (HTTP $status): " . json_encode($res));
+    }
+    $new = 0;
+    foreach ($res['assets']['items'] as $a) {
+        if (isset($seen[$a['id']])) continue;
+        $seen[$a['id']] = true;
+        $new++;
+        if (!empty($a['isTrashed'])) continue;
+        if (!isset($names[strtolower($a['originalFileName'] ?? '')])) continue;
+        $ids[$a['id']] = true;
+    }
+    // Liefert Immich nur schon Gelesenes, klappt das Blättern nicht
+    if ($new === 0) break;
+    if (!empty($res['assets']['nextCursor'])) {
+        $query['cursor'] = $res['assets']['nextCursor'];
+    } elseif (!empty($res['assets']['nextPage'])) {
+        $query['page'] = (int)$res['assets']['nextPage'];
+    } else {
+        break;
+    }
+}
+$ids = array_keys($ids);
+echo count($ids) . " neue Dateien für Album \"$name\"\n";
+if (!$ids) {
+    echo "ERGEBNIS neu=0 fehler=0\n";
+    exit(0);
+}
+
+// --- Album suchen oder anlegen ----------------------------------------------
+[$status, $albums] = api('GET', '/albums');
+if ($status !== 200 || !is_array($albums)) fail("Alben lesen fehlgeschlagen (HTTP $status)");
+$album = null;
+foreach ($albums as $a) {
+    if (($a['albumName'] ?? '') === $name) { $album = $a['id']; break; }
+}
+if ($album === null) {
+    [$status, $res] = api('POST', '/albums', ['albumName' => $name]);
+    if ($status < 200 || $status >= 300 || empty($res['id'])) {
+        fail("Album anlegen fehlgeschlagen (HTTP $status): " . json_encode($res));
+    }
+    $album = $res['id'];
+    echo "Album \"$name\" angelegt\n";
+}
+
+// --- Dateien hinzufügen -----------------------------------------------------
+$errors = 0;
+foreach (array_chunk($ids, 500) as $chunk) {
+    [$status, $res] = api('PUT', "/albums/$album/assets", ['ids' => $chunk]);
+    if ($status < 200 || $status >= 300) {
+        $errors++;
+        fwrite(STDERR, "Hinzufügen fehlgeschlagen (HTTP $status): " . json_encode($res) . "\n");
+    }
+}
+printf("ERGEBNIS neu=%d fehler=%d\n", $errors ? 0 : count($ids), $errors);
+exit($errors ? 1 : 0);
+__CAMERA_IMPORT_EOF__
 put "$BASE_DIR/update.sh" <<'__CAMERA_IMPORT_EOF__'
 #!/bin/bash
 # Holt die neueste camera-import-install.sh von GitHub, ersetzt damit das
@@ -1036,6 +1145,17 @@ report_value() {
   local v
   v=$(grep -E "^\s*$1\s*:" "$2" | tail -n1 | sed -E 's/.*:\s*([0-9]+).*/\1/')
   echo "${v:-0}"
+}
+
+# Nur die bei diesem Import neu hochgeladenen Dateien ins Album legen;
+# gibt z.B. "12 neu hinzugefügt" aus
+# (Dateiliste vorher anlegen, die Karte ist dann schon ausgehängt)
+add_to_album() {
+  local album=$1 start=$2 list=$3 res n line
+  res=$(php "$BASE_DIR/album.php" --name="$album" --since="@$((start - 5))" --files="$list" 2>&1)
+  while IFS= read -r line; do echo "  album | $line"; done <<< "$res" >&2
+  n=$(sed -nE 's/^ERGEBNIS neu=([0-9]+) fehler=0$/\1/p' <<< "$res")
+  if [[ -n "$n" ]]; then echo "$n neu hinzugefügt"; else echo "❌ Einsortieren fehlgeschlagen"; fi
 }
 
 immich_reachable() {
@@ -1147,7 +1267,7 @@ import_partition() {
     --server="$IMMICH_URL" --api-key="$IMMICH_API_KEY"
     --no-ui --pause-immich-jobs=false --on-errors=continue
     --manage-raw-jpeg="$RAW_JPEG")
-  [[ -n "$album" ]] && args+=(--into-album="$album")
+  # Album nicht über immich-go: das sortiert auch schon vorhandene Dateien ein
   (( DRY_RUN )) && args+=(--dry-run)
 
   local out golog start rc pid
@@ -1195,6 +1315,10 @@ Befehle: /status /abbrechen /log"
   pend=$(report_value "Pending" "$out")
   (( DRY_RUN )) && pend=0   # im Probelauf bleiben gestapelte Dateien immer "pending"
 
+  local names
+  names=$(mktemp)
+  find "${paths[@]}" -type f -printf '%f\n' > "$names"
+
   local removable=""
   release_card && removable=$'\nKarte ausgehängt, kann entfernt werden.'
 
@@ -1210,11 +1334,14 @@ Befehle: /status /abbrechen /log"
     msg="❌ Import fehlgeschlagen ($label): Exit $rc, $up neu, $dup vorhanden, $err Fehler
 $(grep -E ' (ERR|WRN) ' "$golog" 2>/dev/null | tail -n 5 | cut -c1-300)"
   fi
-  [[ -n "$album" ]] && msg+=$'\n'"Album: $album"
+  if [[ -n "$album" ]]; then
+    msg+=$'\n'"Album: $album"
+    (( DRY_RUN )) || msg+=" ($(add_to_album "$album" "$start" "$names"))"
+  fi
   log "${msg%%$'\n'*}"
   notify "$msg$removable"
   printf '%s\n%s\n' "$(date '+%F %T')" "$msg" > "$LAST_FILE"
-  rm -f "$out"
+  rm -f "$out" "$names"
 
   # RAW+HIF-Paare stapeln, die immich-go nicht stapelt; bei fehlenden
   # Metadaten bis zu dreimal nach je 30 Minuten erneut

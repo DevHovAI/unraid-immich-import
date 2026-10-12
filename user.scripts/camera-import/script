@@ -25,6 +25,17 @@ report_value() {
   echo "${v:-0}"
 }
 
+# Nur die bei diesem Import neu hochgeladenen Dateien ins Album legen;
+# gibt z.B. "12 neu hinzugefügt" aus
+# (Dateiliste vorher anlegen, die Karte ist dann schon ausgehängt)
+add_to_album() {
+  local album=$1 start=$2 list=$3 res n line
+  res=$(php "$BASE_DIR/album.php" --name="$album" --since="@$((start - 5))" --files="$list" 2>&1)
+  while IFS= read -r line; do echo "  album | $line"; done <<< "$res" >&2
+  n=$(sed -nE 's/^ERGEBNIS neu=([0-9]+) fehler=0$/\1/p' <<< "$res")
+  if [[ -n "$n" ]]; then echo "$n neu hinzugefügt"; else echo "❌ Einsortieren fehlgeschlagen"; fi
+}
+
 immich_reachable() {
   curl -fsS -m 10 "$IMMICH_URL/api/server/ping" 2>/dev/null | grep -q pong
 }
@@ -134,7 +145,7 @@ import_partition() {
     --server="$IMMICH_URL" --api-key="$IMMICH_API_KEY"
     --no-ui --pause-immich-jobs=false --on-errors=continue
     --manage-raw-jpeg="$RAW_JPEG")
-  [[ -n "$album" ]] && args+=(--into-album="$album")
+  # Album nicht über immich-go: das sortiert auch schon vorhandene Dateien ein
   (( DRY_RUN )) && args+=(--dry-run)
 
   local out golog start rc pid
@@ -182,6 +193,10 @@ Befehle: /status /abbrechen /log"
   pend=$(report_value "Pending" "$out")
   (( DRY_RUN )) && pend=0   # im Probelauf bleiben gestapelte Dateien immer "pending"
 
+  local names
+  names=$(mktemp)
+  find "${paths[@]}" -type f -printf '%f\n' > "$names"
+
   local removable=""
   release_card && removable=$'\nKarte ausgehängt, kann entfernt werden.'
 
@@ -197,11 +212,14 @@ Befehle: /status /abbrechen /log"
     msg="❌ Import fehlgeschlagen ($label): Exit $rc, $up neu, $dup vorhanden, $err Fehler
 $(grep -E ' (ERR|WRN) ' "$golog" 2>/dev/null | tail -n 5 | cut -c1-300)"
   fi
-  [[ -n "$album" ]] && msg+=$'\n'"Album: $album"
+  if [[ -n "$album" ]]; then
+    msg+=$'\n'"Album: $album"
+    (( DRY_RUN )) || msg+=" ($(add_to_album "$album" "$start" "$names"))"
+  fi
   log "${msg%%$'\n'*}"
   notify "$msg$removable"
   printf '%s\n%s\n' "$(date '+%F %T')" "$msg" > "$LAST_FILE"
-  rm -f "$out"
+  rm -f "$out" "$names"
 
   # RAW+HIF-Paare stapeln, die immich-go nicht stapelt; bei fehlenden
   # Metadaten bis zu dreimal nach je 30 Minuten erneut

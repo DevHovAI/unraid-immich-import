@@ -13,6 +13,8 @@ FILES=(
   '$BASE_DIR/bot.sh'          boot/camera-import/bot.sh
   '$BASE_DIR/stack.sh'        boot/camera-import/stack.sh
   '$BASE_DIR/stack.php'       boot/camera-import/stack.php
+  '$BASE_DIR/immich.php'      boot/camera-import/immich.php
+  '$BASE_DIR/album.php'       boot/camera-import/album.php
   '$BASE_DIR/update.sh'       boot/camera-import/update.sh
   '$IMPORT_DIR/script'        user.scripts/camera-import/script
 )

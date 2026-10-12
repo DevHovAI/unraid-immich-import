@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.3] – 2026-10-12
+
+### Behoben
+- Ins Album kamen auch Bilder, die schon vorher in Immich lagen (z.B. beim erneuten Einstecken derselben Karte). Jetzt landen nur die bei diesem Import neu hochgeladenen Dateien darin; die Abschlussmeldung nennt, wie viele.
+
 ## [1.0.2] – 2026-10-12
 
 ### Behoben

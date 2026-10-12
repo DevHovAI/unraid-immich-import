@@ -18,6 +18,8 @@ const RAW_EXT = ['arw', 'cr2', 'cr3', 'nef', 'nrw', 'raf', 'dng', 'orf', 'rw2',
                  'pef', 'srw', '3fr', 'iiq', 'erf', 'srf', 'sr2'];
 const DISPLAY_EXT = ['hif', 'heif', 'heic', 'jpg', 'jpeg'];
 
+require __DIR__ . '/immich.php';
+
 $opt = getopt('', ['since::', 'dry-run', 'conf::', 'status::']);
 $statusFile = $opt['status'] ?? '';
 $conf = read_conf($opt['conf'] ?? '/boot/config/camera-import/camera-import.conf');
@@ -29,34 +31,6 @@ $dry = isset($opt['dry-run']);
 if ($url === '' || $key === '') {
     fwrite(STDERR, "IMMICH_URL oder IMMICH_API_KEY fehlt\n");
     exit(2);
-}
-
-// Einstellungen im Shell-Format (KEY="wert") lesen
-function read_conf(string $path): array {
-    $out = [];
-    foreach (@file($path) ?: [] as $line) {
-        if (preg_match('/^\s*([A-Z_]+)=(["\']?)(.*)\2\s*(#.*)?$/', $line, $m)) {
-            $out[$m[1]] = $m[3];
-        }
-    }
-    return $out;
-}
-
-function api(string $method, string $path, array $body): array {
-    global $url, $key;
-    $ctx = stream_context_create(['http' => [
-        'method' => $method,
-        'header' => "x-api-key: $key\r\nContent-Type: application/json\r\nAccept: application/json\r\n",
-        'content' => json_encode($body),
-        'timeout' => 120,
-        'ignore_errors' => true,
-    ]]);
-    $raw = @file_get_contents($url . '/api' . $path, false, $ctx);
-    $status = 0;
-    foreach ($http_response_header ?? [] as $h) {
-        if (preg_match('#^HTTP/\S+\s+(\d+)#', $h, $m)) $status = (int)$m[1];
-    }
-    return [$status, json_decode($raw ?: 'null', true)];
 }
 
 // Fortschritt für /status in eine Datei schreiben

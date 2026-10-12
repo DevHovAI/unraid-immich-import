@@ -20,4 +20,4 @@ jobs:
       - name: shellcheck
         run: shellcheck -x -P SCRIPTDIR user.scripts/*/script boot/camera-import/*.sh camera-import-install.sh
       - name: PHP-Syntax
-        run: php -l boot/camera-import/stack.php
+        run: for f in boot/camera-import/*.php; do php -l "$f"; done
