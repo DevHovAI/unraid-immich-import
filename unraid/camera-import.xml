@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>camera-import</Name>
-  <Repository>ghcr.io/devhovai/unraid-immich-import:latest</Repository>
+  <Repository>ghcr.io/devhovai/unraid-immich-import:beta</Repository>
   <Registry>https://github.com/DevHovAI/unraid-immich-import/pkgs/container/unraid-immich-import</Registry>
   <Network>bridge</Network>
   <Privileged>false</Privileged>
