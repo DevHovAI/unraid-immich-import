@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>camera-import</Name>
+  <Repository>ghcr.io/devhovai/unraid-immich-import:latest</Repository>
+  <Registry>https://github.com/DevHovAI/unraid-immich-import/pkgs/container/unraid-immich-import</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/DevHovAI/unraid-immich-import/issues</Support>
+  <Project>https://github.com/DevHovAI/unraid-immich-import</Project>
+  <Overview>Kamera-Karte einstecken – neue Fotos und Videos landen automatisch in Immich. Meldet sich per Telegram, fragt nach dem Album, stapelt RAW+HIF/JPG-Paare und merkt sich, was schon importiert ist. Braucht Unassigned Devices mit Automount und Read Only für Kartenleser bzw. Kamera.</Overview>
+  <Category>MediaApp:Photos Tools:</Category>
+  <Icon>https://raw.githubusercontent.com/DevHovAI/unraid-immich-import/main/unraid/icon.png</Icon>
+  <Config Name="Karten (Unassigned Devices)" Target="/mnt/disks" Default="/mnt/disks/" Mode="ro,slave" Description="Hier hängt Unassigned Devices die Karte ein. Nur lesend – nicht ändern." Type="Path" Display="always" Required="true" Mask="false">/mnt/disks/</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/camera-import" Mode="rw" Description="Gedächtnis (was schon importiert ist), Protokoll, letzter Import" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/camera-import</Config>
+  <Config Name="Immich-Adresse" Target="IMMICH_URL" Default="" Mode="" Description="z.B. http://&lt;server-ip&gt;:2283" Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="Immich-API-Key" Target="IMMICH_API_KEY" Default="" Mode="" Description="Immich → Kontoeinstellungen → API-Schlüssel (Rechte siehe README, oder „Alle“)" Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Telegram-Bot-Token" Target="TG_BOT_TOKEN" Default="" Mode="" Description="Von @BotFather. Leer = keine Meldungen." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Telegram-Chat-ID" Target="TG_CHAT_ID" Default="" Mode="" Description="Deine Chat-ID (siehe README)" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Album" Target="ALBUM_MODE" Default="ask|date|fixed|none" Mode="" Description="ask = Bot fragt | date = „Import JJJJ-MM-TT“ | fixed = Albumname unten | none = keins" Type="Variable" Display="always" Required="false" Mask="false">ask</Config>
+  <Config Name="Fester Albumname" Target="IMMICH_ALBUM" Default="" Mode="" Description="Nur bei Album = fixed" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Probelauf" Target="DRY_RUN" Default="0|1" Mode="" Description="1 = nichts hochladen, nur melden, was passieren würde" Type="Variable" Display="always" Required="false" Mask="false">0</Config>
+  <Config Name="Wartezeit Albumname (s)" Target="ALBUM_ASK_TIMEOUT" Default="120" Mode="" Description="So lange wartet der Bot auf deine Antwort" Type="Variable" Display="advanced" Required="false" Mask="false">120</Config>
+  <Config Name="Zwischenstände (%)" Target="PROGRESS_STEPS" Default="25 50 75" Mode="" Description="Bei diesen Prozentmarken meldet sich der Bot, leer = nie" Type="Variable" Display="advanced" Required="false" Mask="false">25 50 75</Config>
+  <Config Name="Paare stapeln" Target="STACK_PAIRS" Default="1|0" Mode="" Description="1 = RAW+HIF/JPG nach jedem Import stapeln" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="Vorne im Stapel" Target="STACK_COVER" Default="display|raw" Mode="" Description="display = HIF/JPG vorne, raw = RAW vorne" Type="Variable" Display="advanced" Required="false" Mask="false">display</Config>
+  <Config Name="Zeitabstand für Paare (s)" Target="STACK_TOLERANCE" Default="2" Mode="" Description="Höchster Abstand der Aufnahmezeiten" Type="Variable" Display="advanced" Required="false" Mask="false">2</Config>
+  <Config Name="Gleichzeitige Uploads" Target="UPLOAD_PARALLEL" Default="2" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">2</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Benutzer, als der der Container läuft (99 = nobody)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Gruppe (100 = users)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>

@@ -6,22 +6,37 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Version und Installer prüfen
+      - name: Version prüfen
+        run: test "v$(cat VERSION)" = "$GITHUB_REF_NAME" || { echo "VERSION ($(cat VERSION)) passt nicht zu $GITHUB_REF_NAME"; exit 1; }
+      - name: Bei GHCR anmelden
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Image bauen und hochladen
         run: |
-          test "v$(cat VERSION)" = "$GITHUB_REF_NAME" || { echo "VERSION ($(cat VERSION)) passt nicht zu $GITHUB_REF_NAME"; exit 1; }
-          bash build.sh
-          git diff --exit-code camera-import-install.sh
-          bash -n camera-import-install.sh
-      - name: Release mit camera-import-install.sh
+          v="${GITHUB_REF_NAME#v}"
+          img=ghcr.io/devhovai/unraid-immich-import
+          # Vorabversionen (z.B. 2.0.0-beta.1) bekommen :beta statt :latest
+          if [[ "$v" == *-* ]]; then extra=beta; else extra=latest; fi
+          docker build --build-arg VERSION="$v" \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
+            --label org.opencontainers.image.version="$v" \
+            -t "$img:$v" -t "$img:$extra" .
+          docker push "$img:$v"
+          docker push "$img:$extra"
+      - name: GitHub-Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${GITHUB_REF_NAME#v}"
           awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" camera-import-install.sh --title "$GITHUB_REF_NAME" --notes-file notes.md
+          pre=(); [[ "$v" == *-* ]] && pre=(--prerelease)
+          # Ältere Skript-Versionen holen sich bei /update diese Datei vom neuesten
+          # Release – sie bekommen so die letzte Skript-Version mit dem Umstiegshinweis.
+          gh release create "$GITHUB_REF_NAME" legacy/camera-import-install.sh \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md "${pre[@]}"

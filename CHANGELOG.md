@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.0-beta.1] – 2026-10-12
+
+camera-import ist jetzt ein Docker-Container. Umstieg siehe README, Abschnitt „Umstieg auf v2“.
+
+### Hinzugefügt
+- Gedächtnis: schon importierte Dateien werden beim erneuten Einstecken übersprungen, ohne sie zu lesen
+- `/vergessen` löscht das Gedächtnis
+- `/abbrechen` stoppt auch das Stapeln, wenn kein Import läuft
+- Albumfrage nur noch, wenn es auf der Karte Neues gibt
+
+### Geändert
+- Eigener Upload statt immich-go; Duplikate erkennt Immich per Prüfsumme, bevor hochgeladen wird
+- Einstellungen in der Container-Vorlage statt im Skript, Updates über Docker statt `/update`
+- Die Karte hängt Unassigned Devices nur lesend ein; der Container braucht keine Sonderrechte
+- Die Skript-Version liegt in `legacy/`
+
+### Entfernt
+- `/update`, `RAW_JPEG`, `IMMICH_GO_VERSION`, `CHECK_UPDATES`, `AUTO_UNMOUNT`
+
 ## [1.1.0] – 2026-10-12
 
 ### Hinzugefügt
