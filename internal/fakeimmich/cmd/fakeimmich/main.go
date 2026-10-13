@@ -1,4 +1,4 @@
-// fakeimmich startet das nachgebaute Immich für Rauchtests des Containers:
+// fakeimmich starts the fake Immich for smoke tests of the container:
 //
 //	go run ./internal/fakeimmich/cmd/fakeimmich :2283
 package main
@@ -18,15 +18,15 @@ func main() {
 		addr = os.Args[1]
 	}
 	s := fakeimmich.New()
-	s.Close() // nur den Handler verwenden, auf festem Port
+	s.Close() // use only the handler, on a fixed port
 	go func() {
 		for range time.Tick(2 * time.Second) {
 			s.Lock()
-			fmt.Printf("fakeimmich: %d Dateien, %d Uploads, Alben %v, %d Stapel\n",
+			fmt.Printf("fakeimmich: %d files, %d uploads, albums %v, %d stacks\n",
 				len(s.Assets), s.Uploads, s.Albums, len(s.Stacks))
 			s.Unlock()
 		}
 	}()
-	fmt.Println("fakeimmich auf", addr, "API-Key KEY")
+	fmt.Println("fakeimmich on", addr, "API key KEY")
 	panic(http.ListenAndServe(addr, s.Config.Handler))
 }

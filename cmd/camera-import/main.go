@@ -1,5 +1,5 @@
-// camera-import: lädt Fotos von eingesteckten Kamera-Karten nach Immich und
-// meldet sich per Telegram. Läuft als Docker-Container auf Unraid.
+// camera-import: uploads photos from inserted camera cards to Immich and
+// reports via Telegram. Runs as a Docker container on Unraid.
 package main
 
 import (
@@ -10,14 +10,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
-	_ "time/tzdata" // Zeitzonen ohne zoneinfo im Image (TZ setzt Unraid)
+	_ "time/tzdata" // time zones without zoneinfo in the image (Unraid sets TZ)
 
 	"github.com/DevHovAI/unraid-immich-import/internal/app"
 	"github.com/DevHovAI/unraid-immich-import/internal/config"
 	"github.com/DevHovAI/unraid-immich-import/internal/memory"
 )
 
-var version = "dev" // beim Bauen per -ldflags gesetzt
+var version = "dev" // set at build time via -ldflags
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
@@ -26,7 +26,7 @@ func main() {
 	}
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Einstellungen fehlerhaft – in der Container-Vorlage korrigieren:\n%v\n", err)
+		fmt.Fprintf(os.Stderr, "Invalid settings – fix them in the container template:\n%v\n", err)
 		os.Exit(2)
 	}
 	if err := dropPrivileges(cfg.ConfigDir); err != nil {
@@ -35,25 +35,26 @@ func main() {
 	}
 
 	log := app.NewLogger(filepath.Join(cfg.ConfigDir, "camera-import.log"), os.Stdout)
-	mem, err := memory.Open(filepath.Join(cfg.ConfigDir, "importiert.txt"))
+	app.MigrateFileNames(cfg.ConfigDir, log)
+	mem, err := memory.Open(filepath.Join(cfg.ConfigDir, app.MemoryFile))
 	if err != nil {
-		log.Printf("Gedächtnis öffnen: %v", err)
+		log.Printf("open memory: %v", err)
 		os.Exit(1)
 	}
 	defer mem.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("camera-import %s startet, beobachtet %s", version, cfg.DisksDir)
+	log.Printf("camera-import %s starting, watching %s", version, cfg.DisksDir)
 	app.New(cfg, version, log, mem).Run(ctx)
-	log.Printf("beendet")
+	log.Printf("stopped")
 }
 
-// Als root gestartet (Docker-Standard): /config dem Unraid-Nutzer geben und
-// dann als PUID:PGID (Standard 99:100 = nobody:users) weiterlaufen.
+// Started as root (Docker default): hand /config to the Unraid user, then
+// continue as PUID:PGID (default 99:100 = nobody:users).
 func dropPrivileges(configDir string) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		return fmt.Errorf("%s anlegen: %w", configDir, err)
+		return fmt.Errorf("create %s: %w", configDir, err)
 	}
 	if os.Getuid() != 0 {
 		return nil
@@ -69,7 +70,7 @@ func dropPrivileges(configDir string) error {
 		return os.Lchown(p, uid, gid)
 	})
 	if err != nil {
-		return fmt.Errorf("%s für %d:%d freigeben: %w", configDir, uid, gid, err)
+		return fmt.Errorf("hand %s to %d:%d: %w", configDir, uid, gid, err)
 	}
 	if err := syscall.Setgroups(nil); err != nil {
 		return err

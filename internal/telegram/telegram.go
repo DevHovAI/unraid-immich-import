@@ -1,6 +1,6 @@
-// Package telegram ist ein minimaler Bot-Client: senden und per Long Polling
-// empfangen. Long Polling hält eine Verbindung offen und kostet praktisch
-// keine CPU.
+// Package telegram is a minimal bot client: send, and receive via long
+// polling. Long polling keeps one connection open and costs practically no
+// CPU.
 package telegram
 
 import (
@@ -17,7 +17,7 @@ import (
 type Bot struct {
 	Token string
 	Chat  int64
-	API   string // https://api.telegram.org, in Tests ein Mock
+	API   string // https://api.telegram.org, a mock in tests
 	HTTP  *http.Client
 	Log   func(format string, args ...any)
 }
@@ -38,7 +38,7 @@ func (b *Bot) call(ctx context.Context, method string, form url.Values, out any)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := b.HTTP.Do(req)
 	if err != nil {
-		// Die URL enthält den Token: nicht ins Log
+		// The URL contains the token: keep it out of the log
 		if ue, ok := err.(*url.Error); ok {
 			err = ue.Err
 		}
@@ -62,7 +62,7 @@ func (b *Bot) call(ctx context.Context, method string, form url.Values, out any)
 	return nil
 }
 
-// Send schickt eine Nachricht; Fehler landen nur im Log.
+// Send sends a message; errors only go to the log.
 func (b *Bot) Send(text string) {
 	if !b.Enabled() {
 		return
@@ -76,7 +76,7 @@ func (b *Bot) Send(text string) {
 		"chat_id": {strconv.FormatInt(b.Chat, 10)}, "text": {text},
 	}, nil)
 	if err != nil && b.Log != nil {
-		b.Log("Telegram-Nachricht fehlgeschlagen: %v", err)
+		b.Log("Telegram message failed: %v", err)
 	}
 }
 
@@ -95,8 +95,8 @@ func (b *Bot) SetCommands(ctx context.Context, cmds []Command) error {
 	return b.call(ctx, "setMyCommands", url.Values{"commands": {string(j)}}, nil)
 }
 
-// Poll ruft handle für jede Textnachricht aus dem eigenen Chat auf, bis ctx
-// endet. Nachrichten von vor dem Start werden übersprungen.
+// Poll calls handle for every text message from our own chat until ctx
+// ends. Messages from before the start are skipped.
 func (b *Bot) Poll(ctx context.Context, handle func(text string)) {
 	type update struct {
 		UpdateID int64 `json:"update_id"`
@@ -107,7 +107,7 @@ func (b *Bot) Poll(ctx context.Context, handle func(text string)) {
 			Text string `json:"text"`
 		} `json:"message"`
 	}
-	offset := int64(-1) // -1: nur die letzte alte Nachricht holen und verwerfen
+	offset := int64(-1) // -1: fetch only the last old message and drop it
 	skipOld := true
 	backoff := time.Second
 	for ctx.Err() == nil {
@@ -121,7 +121,7 @@ func (b *Bot) Poll(ctx context.Context, handle func(text string)) {
 				return
 			}
 			if b.Log != nil {
-				b.Log("Telegram-Abfrage: %v", err)
+				b.Log("Telegram poll: %v", err)
 			}
 			select {
 			case <-ctx.Done():

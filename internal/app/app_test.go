@@ -42,7 +42,7 @@ func newTG() *tg {
 	return t
 }
 
-// waitFor wartet, bis eine Nachricht mit diesem Text kam, und gibt sie zurück.
+// waitFor waits until a message with this text arrived and returns it.
 func (t *tg) waitFor(tb testing.TB, part string) string {
 	tb.Helper()
 	for i := 0; i < 300; i++ {
@@ -58,7 +58,7 @@ func (t *tg) waitFor(tb testing.TB, part string) string {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	tb.Fatalf("keine Nachricht mit %q, gesendet:\n%s", part, strings.Join(t.sent, "\n---\n"))
+	tb.Fatalf("no message with %q, sent:\n%s", part, strings.Join(t.sent, "\n---\n"))
 	return ""
 }
 
@@ -80,49 +80,51 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mem, _ := memory.Open(filepath.Join(dir, "importiert.txt"))
+	mem, _ := memory.Open(filepath.Join(dir, MemoryFile))
 	a := New(cfg, "test", NewLogger(filepath.Join(dir, "log"), io.Discard), mem)
 	a.Bot.API = bot.URL
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go a.Run(ctx)
-	bot.waitFor(t, "camera-import vtest gestartet (Immich v3.2.2")
+	bot.waitFor(t, "camera-import vtest started (Immich v3.2.2")
 
-	// Karte einstecken
+	// insert the card
 	root := filepath.Join(disks, "SONY")
 	os.MkdirAll(filepath.Join(root, "DCIM", "100MSDCF"), 0o755)
 	for name, c := range map[string]string{"DSC00001.ARW": "raw", "DSC00001.HIF": "hif"} {
 		os.WriteFile(filepath.Join(root, "DCIM", "100MSDCF", name), []byte(c), 0o644)
 	}
-	bot.waitFor(t, "In welches Album?")
-	if s := a.statusText(); !strings.Contains(s, "wartet auf den Albumnamen") {
+	bot.waitFor(t, "Which album?")
+	if s := a.statusText(); !strings.Contains(s, "waiting for the album name") {
 		t.Fatalf("/status: %s", s)
 	}
-	a.handle("Herbst")
-	sum := bot.waitFor(t, "✅ Import fertig")
-	if !strings.Contains(sum, "2 neu") || !strings.Contains(sum, "Album: Herbst (2 neu hinzugefügt)") {
-		t.Fatalf("Zusammenfassung: %s", sum)
+	a.handle("Autumn")
+	sum := bot.waitFor(t, "✅ Import done")
+	if !strings.Contains(sum, "2 new") || !strings.Contains(sum, "Album: Autumn (2 newly added)") {
+		t.Fatalf("summary: %s", sum)
 	}
-	bot.waitFor(t, "1 von 1 Paaren gestapelt")
+	bot.waitFor(t, "1 of 1 pairs stacked")
 	srv.Lock()
-	if len(srv.Stacks) != 1 || len(srv.Albums["Herbst"]) != 2 {
-		t.Fatalf("Stapel %v, Alben %v", srv.Stacks, srv.Albums)
+	if len(srv.Stacks) != 1 || len(srv.Albums["Autumn"]) != 2 {
+		t.Fatalf("stacks %v, albums %v", srv.Stacks, srv.Albums)
 	}
 	srv.Unlock()
 
-	// Abziehen und wieder einstecken: nichts Neues, keine Albumfrage
-	os.Rename(root, root+".weg")
+	// remove and insert again: nothing new, no album question
+	os.Rename(root, root+".gone")
 	time.Sleep(1500 * time.Millisecond)
-	os.Rename(root+".weg", root)
-	bot.waitFor(t, "nichts Neues (2 Dateien schon importiert)")
+	os.Rename(root+".gone", root)
+	bot.waitFor(t, "nothing new (2 files already imported)")
 
-	a.handle("/vergessen")
-	bot.waitFor(t, "2 Einträge vergessen")
-	a.handle("/stapeln 12.10.2026")
-	bot.waitFor(t, "Unbekanntes Datum")
+	a.handle("/forget")
+	bot.waitFor(t, "Forgot 2 entries")
+	a.handle("/stack 12.10.2026")
+	bot.waitFor(t, "Unknown date")
 	a.handle("/status")
-	bot.waitFor(t, "Weder Import noch Stapeln aktiv")
-	a.handle("/letzter")
-	bot.waitFor(t, "nichts Neues (2")
+	bot.waitFor(t, "Neither import nor stacking running")
+	a.handle("/last")
+	bot.waitFor(t, "nothing new (2")
+	a.handle("/hilfe") // German alias from v1
+	bot.waitFor(t, "Commands:")
 }

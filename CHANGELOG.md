@@ -1,71 +1,79 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- camera-import now speaks English: Telegram messages, commands, log, error messages, container template and README
+- Bot commands are now `/cancel`, `/last`, `/stack`, `/none`, `/forget` and `/help`. The German commands still work.
+- The files in appdata are now called `imported.txt` and `last.txt`; the old ones are renamed on the first start, nothing is lost
+- Sizes use a decimal point (1.5 GB)
+
 ## [2.0.0-beta.1] – 2026-10-12
 
-camera-import ist jetzt ein Docker-Container. Umstieg siehe README, Abschnitt „Umstieg auf v2“.
+camera-import is now a Docker container. How to switch: see README, section "Moving to v2".
 
-### Hinzugefügt
-- Gedächtnis: schon importierte Dateien werden beim erneuten Einstecken übersprungen, ohne sie zu lesen
-- `/vergessen` löscht das Gedächtnis
-- `/abbrechen` stoppt auch das Stapeln, wenn kein Import läuft
-- Albumfrage nur noch, wenn es auf der Karte Neues gibt
+### Added
+- Memory: files that were already imported are skipped when the card is inserted again, without reading them
+- `/vergessen` clears the memory
+- `/abbrechen` also stops stacking when no import is running
+- The album question only comes when there is something new on the card
 
-### Geändert
-- Eigener Upload statt immich-go; Duplikate erkennt Immich per Prüfsumme, bevor hochgeladen wird
-- Einstellungen in der Container-Vorlage statt im Skript, Updates über Docker statt `/update`
-- Die Karte hängt Unassigned Devices nur lesend ein; der Container braucht keine Sonderrechte
-- Die Skript-Version liegt in `legacy/`
+### Changed
+- Own upload instead of immich-go; Immich recognises duplicates by checksum before anything is uploaded
+- Settings live in the container template instead of the script, updates come through Docker instead of `/update`
+- Unassigned Devices mounts the card read-only; the container needs no special privileges
+- The script version lives in `legacy/`
 
-### Entfernt
+### Removed
 - `/update`, `RAW_JPEG`, `IMMICH_GO_VERSION`, `CHECK_UPDATES`, `AUTO_UNMOUNT`
 
 ## [1.1.0] – 2026-10-12
 
-### Hinzugefügt
-- Einstellung `DEINSTALLIEREN="1"`: entfernt camera-import mit „Run Script“ vollständig vom Server (Vorbereitung für den Umstieg auf den Docker-Container v2)
+### Added
+- Setting `DEINSTALLIEREN="1"`: removes camera-import completely from the server with "Run Script" (preparation for switching to the Docker container v2)
 
-### Geändert
-- Eine neue Hauptversion (v2) bietet der Bot nicht per /update an, sondern weist einmal auf den Umstieg hin
+### Changed
+- The bot doesn't offer a new major version (v2) via /update, it points to the switch once instead
 
 ## [1.0.3] – 2026-10-12
 
-### Behoben
-- Ins Album kamen auch Bilder, die schon vorher in Immich lagen (z.B. beim erneuten Einstecken derselben Karte). Jetzt landen nur die bei diesem Import neu hochgeladenen Dateien darin; die Abschlussmeldung nennt, wie viele.
+### Fixed
+- The album also received photos that were already in Immich (e.g. when inserting the same card again). Now only the files newly uploaded by this import go into it; the final message says how many.
 
 ## [1.0.2] – 2026-10-12
 
-### Behoben
-- /update brach mit „syntax error“ ab: das neue Installationsskript lief direkt aus der Datei, die es gerade umschrieb
+### Fixed
+- /update aborted with "syntax error": the new install script ran directly from the file it was rewriting
 
 ## [1.0.1] – 2026-10-12
 
-### Geändert
-- Nach Updates wird nur noch beim Array-Start und bei Nachrichten an den Bot geschaut, nicht mehr täglich im Hintergrund
+### Changed
+- Updates are only checked at array start and on messages to the bot, no longer daily in the background
 
 ## [1.0.0] – 2026-10-12
 
-Erste veröffentlichte Version.
+First released version.
 
-### Hinzugefügt
-- Updates über Telegram: der Bot meldet neue Versionen, /update installiert sie
-- /status zeigt auch den Fortschritt beim Stapeln, mit geschätzter Restzeit
-- Ein einziges Installationsskript `camera-import-install` mit den Einstellungen oben im Skript: lädt immich-go, legt den Import an, startet den Bot, prüft Immich und Telegram. Ersetzt `camera-import-setup`, die conf-Vorlage und die Handarbeit mit `scp`
-- Automatischer Import von SD-Karte oder Kamera nach Immich per udev und User Scripts
-- RAW+JPG-Stapel, Duplikaterkennung über immich-go
-- Telegram-Meldungen zu Start, Zwischenständen (25/50/75 %) und Ergebnis
-- `camera-import/script stapeln [JJJJ-MM-TT]` stapelt von Hand aus der Konsole
-- Telegram-Bot mit /status, /abbrechen, /letzter, /log, /hilfe
-- Albumwahl: keins, fest, nach Datum oder per Telegram-Rückfrage
-- Vorabprüfung, ob Immich erreichbar ist
-- Meldung, wenn die Karte nicht eingehängt werden kann oder immich-go fehlt
-- Automatisches Aushängen von Karten, die Unassigned Devices eingehängt hat
-- Hinweis auf neue immich-go-Versionen
-- Eigener Stapel-Schritt für RAW+HIF/JPG-Paare (Name, Aufnahmezeit, Kamera), auch für ältere Bilder per /stapeln
+### Added
+- Updates via Telegram: the bot reports new versions, /update installs them
+- /status also shows stacking progress, with an estimated time left
+- A single install script `camera-import-install` with the settings at the top of the script: downloads immich-go, sets up the import, starts the bot, checks Immich and Telegram. Replaces `camera-import-setup`, the conf template and manual work with `scp`
+- Automatic import from SD card or camera to Immich via udev and User Scripts
+- RAW+JPG stacks, duplicate detection via immich-go
+- Telegram messages on start, progress (25/50/75 %) and result
+- `camera-import/script stapeln [YYYY-MM-DD]` stacks by hand from the console
+- Telegram bot with /status, /abbrechen, /letzter, /log, /hilfe
+- Album choice: none, fixed, by date or by asking via Telegram
+- Pre-check whether Immich is reachable
+- Message when the card can't be mounted or immich-go is missing
+- Automatic unmounting of cards mounted by Unassigned Devices
+- Notice about new immich-go versions
+- Separate stacking step for RAW+HIF/JPG pairs (name, capture time, camera), also for older photos via /stapeln
 
-### Behoben
-- Beim Beenden des Bots blieben curl/php der laufenden Telegram-Abfrage übrig und hielten die Sperre noch bis zu einer Minute
-- Der vom Installationsskript gestartete Bot erbte die Import-Sperre: neue Importe warteten endlos, das Installationsskript meldete „Gerade läuft ein Import“
-- Das Installationsskript löschte sich selbst, wenn es in das alte Skript camera-import-setup eingefügt wurde
-- /stapeln startete nach einem Neustart nicht, solange noch kein Import gelaufen war (Log-Ordner fehlte)
-- Stapeln bricht ab, statt endlos zu laufen, wenn Immich beim Blättern dieselben Bilder erneut liefert
-- /status und Fehlermeldungen lesen das Protokollformat von immich-go richtig (INF/ERR statt level=…)
+### Fixed
+- When the bot stopped, curl/php of the running Telegram poll were left behind and held the lock for up to a minute
+- The bot started by the install script inherited the import lock: new imports waited forever, the install script reported "an import is running"
+- The install script deleted itself when pasted into the old script camera-import-setup
+- /stapeln didn't start after a reboot as long as no import had run yet (log folder missing)
+- Stacking stops instead of running forever when Immich returns the same photos again while paging
+- /status and error messages read immich-go's log format correctly (INF/ERR instead of level=…)

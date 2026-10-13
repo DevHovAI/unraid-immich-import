@@ -1,6 +1,6 @@
-// Package memory merkt sich, welche Dateien schon in Immich angekommen sind.
-// Schlüssel ist Name + Größe + Änderungszeit: dafür genügt ein stat, die
-// Datei selbst muss beim erneuten Einstecken nicht gelesen werden.
+// Package memory remembers which files have already arrived in Immich.
+// The key is name + size + modification time: a stat is enough for that, the
+// file itself does not have to be read when the card is inserted again.
 package memory
 
 import (
@@ -22,7 +22,7 @@ func Key(name string, size int64, mtime time.Time) string {
 	return fmt.Sprintf("%s\t%d\t%d", name, size, mtime.Unix())
 }
 
-// Open lädt die Datei (eine Zeile pro Schlüssel) und hängt neue Einträge an.
+// Open loads the file (one line per key) and appends new entries.
 func Open(path string) (*Store, error) {
 	s := &Store{path: path, set: map[string]struct{}{}}
 	if f, err := os.Open(path); err == nil {
@@ -60,8 +60,8 @@ func (s *Store) Len() int {
 	return len(s.set)
 }
 
-// Add merkt sich die Schlüssel und schreibt sie sofort auf die Platte, damit
-// ein Absturz oder Neustart nichts Bestätigtes vergisst.
+// Add remembers the keys and writes them to disk right away, so a crash or
+// restart forgets nothing that was confirmed.
 func (s *Store) Add(keys ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -80,7 +80,7 @@ func (s *Store) Add(keys ...string) error {
 	return s.f.Sync()
 }
 
-// Reset vergisst alles (Befehl /vergessen).
+// Reset forgets everything (command /forget).
 func (s *Store) Reset() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

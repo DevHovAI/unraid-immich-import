@@ -1,5 +1,5 @@
-// Package immich ist ein kleiner Client für die Teile der Immich-API, die der
-// Import braucht: Duplikatprüfung, Upload, Suche, Alben und Stapel.
+// Package immich is a small client for the parts of the Immich API the
+// import needs: duplicate check, upload, search, albums and stacks.
 package immich
 
 import (
@@ -17,13 +17,13 @@ import (
 )
 
 type Client struct {
-	BaseURL string // ohne /api
+	BaseURL string // without /api
 	Key     string
 	HTTP    *http.Client
 }
 
 func New(baseURL, key string) *Client {
-	// Kein Gesamt-Timeout: große Videos brauchen lange. Abbruch läuft über ctx.
+	// No overall timeout: large videos take long. Cancelling goes through ctx.
 	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Key: key, HTTP: &http.Client{}}
 }
 
@@ -80,7 +80,7 @@ func (c *Client) send(req *http.Request, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// About prüft Erreichbarkeit und API-Key und liefert die Immich-Version.
+// About checks reachability and API key and returns the Immich version.
 func (c *Client) About(ctx context.Context) (string, error) {
 	var r struct {
 		Version string `json:"version"`
@@ -89,7 +89,7 @@ func (c *Client) About(ctx context.Context) (string, error) {
 	return r.Version, err
 }
 
-// --- Duplikatprüfung --------------------------------------------------------
+// --- Duplicate check --------------------------------------------------------
 
 type CheckItem struct {
 	ID       string `json:"id"`
@@ -98,8 +98,8 @@ type CheckItem struct {
 
 type CheckResult struct {
 	ID        string `json:"id"`
-	Action    string `json:"action"` // accept oder reject
-	Reason    string `json:"reason"` // duplicate oder unsupported-format
+	Action    string `json:"action"` // accept or reject
+	Reason    string `json:"reason"` // duplicate or unsupported-format
 	AssetID   string `json:"assetId"`
 	IsTrashed bool   `json:"isTrashed"`
 }
@@ -116,11 +116,11 @@ func (c *Client) BulkCheck(ctx context.Context, items []CheckItem) ([]CheckResul
 
 type UploadResult struct {
 	ID     string `json:"id"`
-	Status string `json:"status"` // created oder duplicate
+	Status string `json:"status"` // created or duplicate
 }
 
-// Upload schickt eine Datei, ohne sie ganz in den Speicher zu laden.
-// progress wird mit der Zahl der jeweils gelesenen Bytes aufgerufen.
+// Upload sends a file without loading it into memory as a whole.
+// progress is called with the number of bytes read each time.
 func (c *Client) Upload(ctx context.Context, path, checksum string, progress func(int64)) (UploadResult, error) {
 	var res UploadResult
 	f, err := os.Open(path)
@@ -186,7 +186,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// --- Suche ------------------------------------------------------------------
+// --- Search -----------------------------------------------------------------
 
 type Asset struct {
 	ID               string    `json:"id"`
@@ -213,8 +213,8 @@ type SearchQuery struct {
 	Cursor       string     `json:"cursor,omitempty"`
 }
 
-// Search blättert durch alle Treffer und ruft fn je Seite auf.
-// Ab Immich 3.2 per Cursor, davor per Seitenzahl.
+// Search pages through all hits and calls fn for each page.
+// From Immich 3.2 on by cursor, before that by page number.
 func (c *Client) Search(ctx context.Context, q SearchQuery, fn func([]Asset) error) error {
 	if q.Size == 0 {
 		q.Size = 1000
@@ -238,10 +238,10 @@ func (c *Client) Search(ctx context.Context, q SearchQuery, fn func([]Asset) err
 				fresh = append(fresh, a)
 			}
 		}
-		// Liefert Immich nur schon Gelesenes, klappt das Blättern nicht:
-		// abbrechen statt endlos dieselbe Seite zu holen
+		// If Immich only returns what was already read, paging is broken:
+		// stop instead of fetching the same page forever
 		if len(fresh) == 0 && len(r.Assets.Items) > 0 {
-			return fmt.Errorf("Blättern fehlgeschlagen: Immich liefert dieselben Dateien erneut")
+			return fmt.Errorf("paging failed: Immich returns the same files again")
 		}
 		if err := fn(fresh); err != nil {
 			return err
@@ -257,17 +257,17 @@ func (c *Client) Search(ctx context.Context, q SearchQuery, fn func([]Asset) err
 	}
 }
 
-// --- Alben und Stapel -------------------------------------------------------
+// --- Albums and stacks ------------------------------------------------------
 
-// AddToAlbum legt die Dateien in das Album mit diesem Namen und legt es an,
-// falls es noch keins gibt.
+// AddToAlbum puts the files into the album with this name and creates it if
+// it doesn't exist yet.
 func (c *Client) AddToAlbum(ctx context.Context, name string, ids []string) (created bool, err error) {
 	var albums []struct {
 		ID        string `json:"id"`
 		AlbumName string `json:"albumName"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/albums", nil, &albums); err != nil {
-		return false, fmt.Errorf("Alben lesen: %w", err)
+		return false, fmt.Errorf("read albums: %w", err)
 	}
 	albumID := ""
 	for _, a := range albums {
@@ -281,20 +281,20 @@ func (c *Client) AddToAlbum(ctx context.Context, name string, ids []string) (cre
 			ID string `json:"id"`
 		}
 		if err := c.do(ctx, http.MethodPost, "/albums", map[string]any{"albumName": name}, &a); err != nil {
-			return false, fmt.Errorf("Album anlegen: %w", err)
+			return false, fmt.Errorf("create album: %w", err)
 		}
 		albumID, created = a.ID, true
 	}
 	for start := 0; start < len(ids); start += 500 {
 		chunk := ids[start:min(start+500, len(ids))]
 		if err := c.do(ctx, http.MethodPut, "/albums/"+albumID+"/assets", map[string]any{"ids": chunk}, nil); err != nil {
-			return created, fmt.Errorf("ins Album legen: %w", err)
+			return created, fmt.Errorf("add to album: %w", err)
 		}
 	}
 	return created, nil
 }
 
-// CreateStack stapelt die Dateien; die erste liegt vorne.
+// CreateStack stacks the files; the first one is on top.
 func (c *Client) CreateStack(ctx context.Context, ids []string) error {
 	return c.do(ctx, http.MethodPost, "/stacks", map[string]any{"assetIds": ids}, nil)
 }

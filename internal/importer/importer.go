@@ -1,4 +1,4 @@
-// Package importer erkennt eingesteckte Karten und lädt neue Dateien nach Immich.
+// Package importer detects inserted cards and uploads new files to Immich.
 package importer
 
 import (
@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,21 +18,29 @@ import (
 	"github.com/DevHovAI/unraid-immich-import/internal/memory"
 )
 
+// Phases shown by /status
+const (
+	PhaseAlbum     = "waiting for the album name"
+	PhaseChecking  = "checking for duplicates"
+	PhaseUploading = "uploading"
+	PhaseAddAlbum  = "adding to album"
+)
+
 type Options struct {
 	DryRun        bool
 	Parallel      int
 	ProgressSteps []int
 }
 
-// Importer lädt jeweils eine Karte hoch. Status und Abbrechen sind von anderen
-// Goroutinen (dem Bot) aus aufrufbar.
+// Importer uploads one card at a time. Status and cancel can be called from
+// other goroutines (the bot).
 type Importer struct {
 	Opt    Options
 	Immich *immich.Client
 	Mem    *memory.Store
 	Notify func(string)
 	Logf   func(string, ...any)
-	// ChooseAlbum fragt den Albumnamen ("" = keins) für n neue Dateien.
+	// ChooseAlbum asks for the album name ("" = none) for n new files.
 	ChooseAlbum func(ctx context.Context, card string, n int) string
 
 	mu     sync.Mutex
@@ -45,23 +52,23 @@ type Progress struct {
 	Card     string
 	Album    string
 	Start    time.Time
-	Total    int   // neue Dateien
-	Known    int   // vom Gedächtnis übersprungen
-	Bytes    int64 // Größe der neuen Dateien
+	Total    int   // new files
+	Known    int   // skipped thanks to the memory
+	Bytes    int64 // size of the new files
 	phase    atomic.Value
-	Checked  atomic.Int64 // Prüfsumme berechnet
-	Done     atomic.Int64 // fertig (hochgeladen, Duplikat oder Fehler)
+	Checked  atomic.Int64 // checksum computed
+	Done     atomic.Int64 // finished (uploaded, duplicate or error)
 	Created  atomic.Int64
 	Dup      atomic.Int64
 	Failed   atomic.Int64
 	BytesUp  atomic.Int64
-	Rejected atomic.Int64 // von Immich nicht unterstütztes Format
+	Rejected atomic.Int64 // format not supported by Immich
 }
 
 func (p *Progress) Phase() string     { s, _ := p.phase.Load().(string); return s }
 func (p *Progress) setPhase(s string) { p.phase.Store(s) }
 
-// Percent nach Bytes, damit große Videos richtig zählen
+// Percent by bytes, so large videos count correctly
 func (p *Progress) Percent() int {
 	if p.Bytes == 0 {
 		return 100
@@ -74,26 +81,26 @@ type Result struct {
 	Album      string
 	Start      time.Time
 	Duration   time.Duration
-	Total      int // neue Dateien auf der Karte
-	Known      int // vom Gedächtnis übersprungen
+	Total      int // new files on the card
+	Known      int // skipped thanks to the memory
 	Created    int
 	Dup        int
 	Failed     int
 	Rejected   int
-	Trashed    int // liegt in Immich im Papierkorb
+	Trashed    int // in Immich's trash
 	Canceled   bool
 	Errors     []string
 	CreatedIDs []string
 }
 
-// Current gibt den laufenden Import zurück oder nil.
+// Current returns the running import or nil.
 func (im *Importer) Current() *Progress {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	return im.cur
 }
 
-// Cancel bricht den laufenden Import ab; false, wenn keiner läuft.
+// Cancel stops the running import; false if none is running.
 func (im *Importer) Cancel() bool {
 	im.mu.Lock()
 	defer im.mu.Unlock()
@@ -115,13 +122,13 @@ type job struct {
 	sum string
 }
 
-// Import lädt alle neuen Dateien der Karte hoch. Bekannte Dateien (Gedächtnis)
-// werden nicht angefasst, nur per stat erkannt.
+// Import uploads all new files on the card. Known files (memory) are not
+// touched, only recognised via stat.
 func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	res := Result{Card: card.Label, Start: time.Now()}
 	files, err := Scan(card)
 	if err != nil {
-		return res, fmt.Errorf("Karte lesen: %w", err)
+		return res, fmt.Errorf("read card: %w", err)
 	}
 	var fresh []File
 	var bytes int64
@@ -134,7 +141,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 		bytes += f.Size
 	}
 	res.Total = len(fresh)
-	im.logf("%s: %d Dateien, davon %d neu (%s)", card.Label, len(files), len(fresh), fmtBytes(bytes))
+	im.logf("%s: %d files, %d of them new (%s)", card.Label, len(files), len(fresh), fmtBytes(bytes))
 	if len(fresh) == 0 {
 		return res, nil
 	}
@@ -142,7 +149,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	p := &Progress{Card: card.Label, Start: res.Start, Total: len(fresh), Known: res.Known, Bytes: bytes}
-	p.setPhase("wartet auf den Albumnamen")
+	p.setPhase(PhaseAlbum)
 	im.mu.Lock()
 	im.cur, im.cancel = p, cancel
 	im.mu.Unlock()
@@ -158,21 +165,21 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	}
 	mode := ""
 	if im.Opt.DryRun {
-		mode = " (Probelauf)"
+		mode = " (dry run)"
 	}
-	msg := fmt.Sprintf("📷 Import gestartet%s: %d neue Dateien von %s (%s)", mode, len(fresh), card.Label, fmtBytes(bytes))
+	msg := fmt.Sprintf("📷 Import started%s: %d new files from %s (%s)", mode, len(fresh), card.Label, fmtBytes(bytes))
 	if res.Known > 0 {
-		msg += fmt.Sprintf(", %d schon früher importiert", res.Known)
+		msg += fmt.Sprintf(", %d imported earlier", res.Known)
 	}
 	if res.Album != "" {
 		msg += fmt.Sprintf("\nAlbum: %s", res.Album)
 	}
-	im.Notify(msg + "\nBefehle: /status /abbrechen /log")
+	im.Notify(msg + "\nCommands: /status /cancel /log")
 
 	stopWatch := im.watchProgress(p)
 	defer stopWatch()
 
-	var mu sync.Mutex // schützt res
+	var mu sync.Mutex // guards res
 	fail := func(f File, err error) {
 		p.Failed.Add(1)
 		p.Done.Add(1)
@@ -182,20 +189,20 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", f.Name, err))
 		}
 		mu.Unlock()
-		im.logf("Fehler bei %s: %v", f.Path, err)
+		im.logf("error on %s: %v", f.Path, err)
 	}
 	remember := func(f File) {
 		if im.Opt.DryRun {
 			return
 		}
 		if err := im.Mem.Add(f.Key()); err != nil {
-			im.logf("Gedächtnis schreiben: %v", err)
+			im.logf("write memory: %v", err)
 		}
 	}
 
-	// 1. Prüfsummen und Duplikatprüfung, in Blöcken: so beginnt der Upload
-	//    nicht erst, wenn die ganze Karte gelesen ist
-	p.setPhase("prüft auf Duplikate")
+	// 1. Checksums and duplicate check, in blocks: so the upload does not
+	//    wait until the whole card has been read
+	p.setPhase(PhaseChecking)
 	jobs := make(chan job)
 	var wg sync.WaitGroup
 	for range max(im.Opt.Parallel, 1) {
@@ -233,7 +240,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 		if err != nil {
 			if ctx.Err() == nil {
 				for _, j := range items {
-					fail(j.f, fmt.Errorf("Duplikatprüfung: %w", err))
+					fail(j.f, fmt.Errorf("duplicate check: %w", err))
 				}
 			}
 			continue
@@ -263,10 +270,10 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 				mu.Lock()
 				res.Rejected++
 				mu.Unlock()
-				im.logf("%s: von Immich abgelehnt (%s)", j.f.Name, r.Reason)
-				remember(j.f) // wird nie klappen, nicht jedes Mal neu versuchen
+				im.logf("%s: rejected by Immich (%s)", j.f.Name, r.Reason)
+				remember(j.f) // will never work, don't retry every time
 			case im.Opt.DryRun:
-				p.Created.Add(1) // im Probelauf: „würde hochladen“
+				p.Created.Add(1) // dry run: "would upload"
 				p.Done.Add(1)
 				p.BytesUp.Add(j.f.Size)
 				mu.Lock()
@@ -275,7 +282,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 			default:
 				select {
 				case jobs <- j:
-					p.setPhase("lädt hoch")
+					p.setPhase(PhaseUploading)
 				case <-ctx.Done():
 				}
 			}
@@ -287,9 +294,9 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	res.Canceled = ctx.Err() != nil && errors.Is(ctx.Err(), context.Canceled)
 	res.Duration = time.Since(res.Start)
 
-	// 2. Nur die wirklich neuen Dateien ins Album
+	// 2. Only the really new files go into the album
 	if res.Album != "" && len(res.CreatedIDs) > 0 {
-		p.setPhase("legt ins Album")
+		p.setPhase(PhaseAddAlbum)
 		if _, err := im.Immich.AddToAlbum(context.WithoutCancel(ctx), res.Album, res.CreatedIDs); err != nil {
 			res.Errors = append(res.Errors, "Album: "+err.Error())
 			im.logf("Album %q: %v", res.Album, err)
@@ -306,9 +313,9 @@ func (im *Importer) upload(ctx context.Context, p *Progress, j job, res *Result,
 		p.BytesUp.Add(n)
 	})
 	if err != nil {
-		p.BytesUp.Add(j.f.Size - sent.Load()) // für den Fortschritt als erledigt zählen
+		p.BytesUp.Add(j.f.Size - sent.Load()) // count as done for the progress
 		if ctx.Err() != nil {
-			return // abgebrochen: nicht als Fehler zählen, nächstes Mal neu
+			return // cancelled: not an error, try again next time
 		}
 		fail(j.f, err)
 		return
@@ -327,8 +334,8 @@ func (im *Importer) upload(ctx context.Context, p *Progress, j job, res *Result,
 	remember(j.f)
 }
 
-// watchProgress meldet Zwischenstände bei den Prozentmarken aus PROGRESS_STEPS.
-// Springt der Fortschritt über mehrere Marken, kommt nur die höchste.
+// watchProgress reports progress at the percentages from PROGRESS_STEPS.
+// If progress jumps past several of them, only the highest is reported.
 func (im *Importer) watchProgress(p *Progress) (stop func()) {
 	steps := append([]int(nil), im.Opt.ProgressSteps...)
 	done := make(chan struct{})
@@ -346,7 +353,7 @@ func (im *Importer) watchProgress(p *Progress) (stop func()) {
 				hit, steps = steps[0], steps[1:]
 			}
 			if hit > 0 {
-				im.Notify(fmt.Sprintf("⏳ %d %% geschafft (%s): %d von %d Dateien, Laufzeit %s",
+				im.Notify(fmt.Sprintf("⏳ %d %% done (%s): %d of %d files, running for %s",
 					hit, p.Card, p.Done.Load(), p.Total, FmtDur(time.Since(p.Start))))
 			}
 		}
@@ -389,7 +396,7 @@ func FmtDur(d time.Duration) string {
 func fmtBytes(n int64) string {
 	switch {
 	case n >= 1<<30:
-		return strings.Replace(fmt.Sprintf("%.1f GB", float64(n)/(1<<30)), ".", ",", 1)
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
 	case n >= 1<<20:
 		return fmt.Sprintf("%d MB", n>>20)
 	default:

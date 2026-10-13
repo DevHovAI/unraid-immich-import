@@ -13,8 +13,8 @@ type Result struct {
 	ErrorSamples                              []string
 }
 
-// Run liest die Bibliothek (oder nur seit since Hochgeladenes), bildet Paare
-// und legt die Stapel an. progress bekommt Zwischenstände für /status.
+// Run reads the library (or only what was uploaded since since), forms pairs
+// and creates the stacks. progress receives updates for /status.
 func Run(ctx context.Context, c *immich.Client, since *time.Time, tol time.Duration,
 	cover string, dry bool, progress func(string)) (Result, error) {
 	var res Result
@@ -22,13 +22,13 @@ func Run(ctx context.Context, c *immich.Client, since *time.Time, tol time.Durat
 	q := immich.SearchQuery{CreatedAfter: since, WithExif: true, WithStacked: true}
 	err := c.Search(ctx, q, func(page []immich.Asset) error {
 		col.Add(page)
-		progress(fmt.Sprintf("Bibliothek lesen: %d Dateien", col.Seen))
+		progress(fmt.Sprintf("reading library: %d files", col.Seen))
 		return nil
 	})
 	if err != nil {
-		return res, fmt.Errorf("Suche: %w", err)
+		return res, fmt.Errorf("search: %w", err)
 	}
-	progress(fmt.Sprintf("Paare suchen in %d Dateien …", col.Seen))
+	progress(fmt.Sprintf("looking for pairs in %d files …", col.Seen))
 	pairs, st := col.Pairs(tol, cover)
 	res.Pairs, res.Ambiguous, res.NoDate = len(pairs), st.Ambiguous, st.NoDate
 	if dry {
@@ -41,13 +41,13 @@ func Run(ctx context.Context, c *immich.Client, since *time.Time, tol time.Durat
 			return res, err
 		}
 		if n%10 == 0 {
-			line := fmt.Sprintf("Stapel anlegen: %d von %d (%d %%)", n, len(pairs), 100*n/len(pairs))
+			line := fmt.Sprintf("creating stacks: %d of %d (%d %%)", n, len(pairs), 100*n/len(pairs))
 			if n >= 20 {
 				rest := time.Duration(float64(time.Since(t0)) / float64(n) * float64(len(pairs)-n))
 				if rest < time.Minute {
-					line += ", gleich fertig"
+					line += ", almost done"
 				} else {
-					line += fmt.Sprintf(", noch ca. %d Min.", int(rest.Round(time.Minute).Minutes()))
+					line += fmt.Sprintf(", about %d min left", int(rest.Round(time.Minute).Minutes()))
 				}
 			}
 			progress(line)

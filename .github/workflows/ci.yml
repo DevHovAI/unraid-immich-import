@@ -19,20 +19,20 @@ jobs:
         run: go vet ./...
       - name: test
         run: go test -race ./...
-      - name: Image bauen
+      - name: Build image
         run: docker build --build-arg VERSION=ci -t camera-import:ci . && docker run --rm camera-import:ci --version
 
   legacy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Installer aktuell?
+      - name: Installer up to date?
         run: |
           cd legacy && bash build.sh
-          git diff --exit-code camera-import-install.sh || { echo "legacy/camera-import-install.sh veraltet"; exit 1; }
-      - name: Syntax und shellcheck
+          git diff --exit-code camera-import-install.sh || { echo "legacy/camera-import-install.sh is out of date"; exit 1; }
+      - name: Syntax and shellcheck
         run: |
           for f in legacy/user.scripts/*/script legacy/boot/camera-import/*.sh legacy/camera-import-install.sh; do bash -n "$f"; done
           shellcheck -x -P SCRIPTDIR legacy/user.scripts/*/script legacy/boot/camera-import/*.sh legacy/camera-import-install.sh
-      - name: PHP-Syntax
+      - name: PHP syntax
         run: for f in legacy/boot/camera-import/*.php; do php -l "$f"; done

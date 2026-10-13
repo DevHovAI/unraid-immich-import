@@ -1,13 +1,13 @@
-# Einstellungen mit Zugangsdaten – gehören nie ins Repo
+# Settings with credentials – never belong in the repo
 camera-import.conf
 letzter-import.txt
 .immich-go-gemeldet
 
-# Binary, wird von GitHub geladen
+# Binary, downloaded from GitHub
 legacy/boot/camera-import/bin/
 *.tar.gz
 
-# Lokal und privat
+# Local and private
 .claude/
 .env
 .env.*
@@ -16,7 +16,7 @@ legacy/boot/camera-import/bin/
 *.log
 secrets.*
 
-# Editor-Sicherungen (Kate, vim, emacs) – können Einstellungen mit Zugangsdaten enthalten
+# Editor backups (Kate, vim, emacs) – may contain settings with credentials
 *.kate-swp
 *.swp
 *.swo

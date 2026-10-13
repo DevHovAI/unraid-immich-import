@@ -14,7 +14,7 @@ import (
 	"github.com/DevHovAI/unraid-immich-import/internal/memory"
 )
 
-// card legt eine Karte mit Dateien (Name → Inhalt) an.
+// card creates a card with files (name → content).
 func card(t *testing.T, files map[string]string) Card {
 	root := filepath.Join(t.TempDir(), "SONY")
 	for name, content := range files {
@@ -58,11 +58,11 @@ func setup(t *testing.T, album string) *env {
 }
 
 func TestImportRememberAndRetry(t *testing.T) {
-	e := setup(t, "Urlaub")
+	e := setup(t, "Holiday")
 	c := card(t, map[string]string{
-		"DSC00001.ARW": "raw1", "DSC00001.HIF": "hif1", // schon in Immich
+		"DSC00001.ARW": "raw1", "DSC00001.HIF": "hif1", // already in Immich
 		"DSC00002.ARW": "raw2", "DSC00002.HIF": "hif2", "C0001.MP4": "video",
-		"notes.txt": "ignorieren", "._DSC00002.ARW": "mac-müll",
+		"notes.txt": "ignore", "._DSC00002.ARW": "mac-junk",
 	})
 	e.srv.Have("DSC00001.ARW", []byte("raw1"))
 	e.srv.Have("DSC00001.HIF", []byte("hif1"))
@@ -73,16 +73,16 @@ func TestImportRememberAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Total != 5 || res.Created != 2 || res.Dup != 2 || res.Failed != 1 || res.Known != 0 {
-		t.Fatalf("erster Lauf: %+v", res)
+		t.Fatalf("first run: %+v", res)
 	}
-	if got := e.srv.Albums["Urlaub"]; len(got) != 2 {
-		t.Fatalf("Album soll nur die 2 neuen enthalten: %v", got)
+	if got := e.srv.Albums["Holiday"]; len(got) != 2 {
+		t.Fatalf("album should hold only the 2 new ones: %v", got)
 	}
 	if e.mem.Len() != 4 {
-		t.Fatalf("Gedächtnis: %d statt 4 (Fehlschlag darf nicht rein)", e.mem.Len())
+		t.Fatalf("memory: %d instead of 4 (a failure must not go in)", e.mem.Len())
 	}
 
-	// Zweites Einstecken: nur die fehlgeschlagene Datei wird erneut versucht
+	// second insert: only the failed file is retried
 	delete(e.srv.Fail, "DSC00002.HIF")
 	e.srv.Checked = 0
 	res, err = e.im.Import(context.Background(), c)
@@ -90,17 +90,17 @@ func TestImportRememberAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Known != 4 || res.Total != 1 || res.Created != 1 || e.srv.Checked != 1 {
-		t.Fatalf("zweiter Lauf: %+v, geprüft %d", res, e.srv.Checked)
+		t.Fatalf("second run: %+v, checked %d", res, e.srv.Checked)
 	}
-	if got := e.srv.Albums["Urlaub"]; len(got) != 3 {
-		t.Fatalf("vorhandenes Album weiterverwenden: %v", e.srv.Albums)
+	if got := e.srv.Albums["Holiday"]; len(got) != 3 {
+		t.Fatalf("reuse existing album: %v", e.srv.Albums)
 	}
 
-	// Drittes Mal: nichts Neues, Immich wird gar nicht gefragt
+	// third time: nothing new, Immich is not asked at all
 	e.srv.Checked = 0
 	res, _ = e.im.Import(context.Background(), c)
 	if res.Total != 0 || res.Known != 5 || e.srv.Checked != 0 {
-		t.Fatalf("dritter Lauf: %+v", res)
+		t.Fatalf("third run: %+v", res)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestDryRunChangesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Created != 1 || res.Dup != 1 || e.srv.Uploads != 0 || e.mem.Len() != 0 {
-		t.Fatalf("%+v, Uploads %d, Gedächtnis %d", res, e.srv.Uploads, e.mem.Len())
+		t.Fatalf("%+v, uploads %d, memory %d", res, e.srv.Uploads, e.mem.Len())
 	}
 }
 
@@ -132,7 +132,7 @@ func TestCancel(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 		if !e.im.Cancel() {
-			t.Error("Cancel ohne laufenden Import")
+			t.Error("Cancel without a running import")
 		}
 	}()
 	res, err := e.im.Import(context.Background(), c)
@@ -143,17 +143,17 @@ func TestCancel(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 	if e.mem.Len() != res.Created {
-		t.Fatalf("Gedächtnis %d, hochgeladen %d", e.mem.Len(), res.Created)
+		t.Fatalf("memory %d, uploaded %d", e.mem.Len(), res.Created)
 	}
 	if e.im.Current() != nil || e.im.Cancel() {
-		t.Fatal("nach dem Import darf nichts mehr laufen")
+		t.Fatal("nothing may run after the import")
 	}
 }
 
 func TestFindCards(t *testing.T) {
 	disks := t.TempDir()
 	os.MkdirAll(filepath.Join(disks, "SONY", "DCIM"), 0o755)
-	os.MkdirAll(filepath.Join(disks, "BACKUP", "daten"), 0o755)
+	os.MkdirAll(filepath.Join(disks, "BACKUP", "data"), 0o755)
 	cards := FindCards(disks)
 	if len(cards) != 1 || cards[0].Label != "SONY" {
 		t.Fatalf("%+v", cards)
