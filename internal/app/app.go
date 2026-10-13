@@ -1,4 +1,4 @@
-// Package app verbindet Watcher, Importer, Stapeln und Telegram-Bot.
+// Package app connects watcher, importer, stacking and Telegram bot.
 package app
 
 import (
@@ -18,6 +18,37 @@ import (
 	"github.com/DevHovAI/unraid-immich-import/internal/telegram"
 )
 
+// Files in the config directory
+const (
+	MemoryFile = "imported.txt"
+	LastFile   = "last.txt"
+)
+
+// renamed maps the German file names of 2.0.0-beta.1 to the current ones.
+var renamed = map[string]string{
+	"importiert.txt": MemoryFile,
+	"letzter.txt":    LastFile,
+}
+
+// MigrateFileNames renames files from 2.0.0-beta.1, so an update keeps the
+// memory. A file that already exists under the new name is left alone.
+func MigrateFileNames(dir string, log *Logger) {
+	for old, cur := range renamed {
+		from, to := filepath.Join(dir, old), filepath.Join(dir, cur)
+		if _, err := os.Stat(from); err != nil {
+			continue
+		}
+		if _, err := os.Stat(to); err == nil {
+			continue
+		}
+		if err := os.Rename(from, to); err != nil {
+			log.Printf("rename %s to %s: %v", old, cur, err)
+			continue
+		}
+		log.Printf("renamed %s to %s", old, cur)
+	}
+}
+
 type App struct {
 	Cfg     config.Config
 	Version string
@@ -27,13 +58,13 @@ type App struct {
 	Log     *Logger
 	Imp     *importer.Importer
 
-	// StackRetryDelay: Wartezeit, bis Immich die Metadaten gelesen hat
+	// StackRetryDelay: how long to wait until Immich has read the metadata
 	StackRetryDelay time.Duration
 
-	ctx       context.Context // lebt so lange wie Run
+	ctx       context.Context // lives as long as Run
 	mu        sync.Mutex
-	answer    chan string // offen, solange auf den Albumnamen gewartet wird
-	stackMu   sync.Mutex  // nur ein Stapellauf gleichzeitig
+	answer    chan string // open while waiting for the album name
+	stackMu   sync.Mutex  // only one stacking run at a time
 	stackInfo *stackState
 }
 
@@ -64,35 +95,35 @@ func (a *App) notify(msg string) {
 
 func (a *App) mode() string {
 	if a.Cfg.DryRun {
-		return " (Probelauf)"
+		return " (dry run)"
 	}
 	return ""
 }
 
-// Run läuft bis ctx endet: Bot und Kartenüberwachung.
+// Run runs until ctx ends: bot and card watcher.
 func (a *App) Run(ctx context.Context) {
 	a.ctx = ctx
 	ver, err := a.Immich.About(ctx)
-	start := fmt.Sprintf("✅ camera-import v%s gestartet%s", a.Version, a.mode())
+	start := fmt.Sprintf("✅ camera-import v%s started%s", a.Version, a.mode())
 	if err != nil {
-		start = fmt.Sprintf("⚠️ camera-import v%s gestartet, aber Immich (%s) antwortet nicht: %v",
+		start = fmt.Sprintf("⚠️ camera-import v%s started, but Immich (%s) is not responding: %v",
 			a.Version, a.Cfg.ImmichURL, err)
 	} else {
-		start += fmt.Sprintf(" (Immich %s, %d Dateien im Gedächtnis)", ver, a.Mem.Len())
+		start += fmt.Sprintf(" (Immich %s, %d files in memory)", ver, a.Mem.Len())
 	}
 	a.notify(start)
 
 	if a.Bot.Enabled() {
 		if err := a.Bot.SetCommands(ctx, commands); err != nil {
-			a.Log.Printf("Telegram-Befehle setzen: %v", err)
+			a.Log.Printf("set Telegram commands: %v", err)
 		}
 		go a.Bot.Poll(ctx, a.handle)
 	}
 	a.watch(ctx)
 }
 
-// watch schaut regelmäßig nach Karten. Eine Karte wird einmal importiert und
-// erst wieder, nachdem sie verschwunden war.
+// watch looks for cards at regular intervals. A card is imported once, and
+// again only after it was gone.
 func (a *App) watch(ctx context.Context) {
 	done := map[string]bool{}
 	t := time.NewTicker(a.Cfg.PollInterval)
@@ -110,7 +141,7 @@ func (a *App) watch(ctx context.Context) {
 		for root := range done {
 			if !present[root] {
 				delete(done, root)
-				a.Log.Printf("%s entfernt", filepath.Base(root))
+				a.Log.Printf("%s removed", filepath.Base(root))
 			}
 		}
 		select {
@@ -122,17 +153,17 @@ func (a *App) watch(ctx context.Context) {
 }
 
 func (a *App) importCard(ctx context.Context, c importer.Card) {
-	a.Log.Printf("Karte erkannt: %s", c.Root)
+	a.Log.Printf("card detected: %s", c.Root)
 	res, err := a.Imp.Import(ctx, c)
 	var msg string
 	switch {
 	case err != nil:
-		msg = fmt.Sprintf("❌ Import von %s fehlgeschlagen: %v", c.Label, err)
+		msg = fmt.Sprintf("❌ Import from %s failed: %v", c.Label, err)
 		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
-			msg += "\nDer Container darf die Karte nicht lesen – siehe README (Unassigned Devices)."
+			msg += "\nThe container is not allowed to read the card – see README (Unassigned Devices)."
 		}
 	case res.Total == 0:
-		msg = fmt.Sprintf("📷 %s: nichts Neues (%d Dateien schon importiert). Karte kann abgezogen werden.", c.Label, res.Known)
+		msg = fmt.Sprintf("📷 %s: nothing new (%d files already imported). The card can be removed.", c.Label, res.Known)
 	default:
 		msg = summary(res, a.mode())
 	}
@@ -149,44 +180,45 @@ func summary(r importer.Result, mode string) string {
 	var b strings.Builder
 	switch {
 	case r.Canceled:
-		fmt.Fprintf(&b, "⏹️ Import abgebrochen (%s): %d neu, %d schon vorhanden, nach %s", r.Card, r.Created, r.Dup, importer.FmtDur(r.Duration))
+		fmt.Fprintf(&b, "⏹️ Import cancelled (%s): %d new, %d already there, after %s", r.Card, r.Created, r.Dup, importer.FmtDur(r.Duration))
 	case r.Failed == 0:
-		verb := "neu"
+		verb := "new"
 		if mode != "" {
-			verb = "würden hochgeladen"
+			verb = "would be uploaded"
 		}
-		fmt.Fprintf(&b, "✅ Import fertig%s (%s): %d %s, %d schon vorhanden, Dauer %s", mode, r.Card, r.Created, verb, r.Dup, importer.FmtDur(r.Duration))
+		fmt.Fprintf(&b, "✅ Import done%s (%s): %d %s, %d already there, took %s", mode, r.Card, r.Created, verb, r.Dup, importer.FmtDur(r.Duration))
 	default:
-		fmt.Fprintf(&b, "⚠️ Import mit Fehlern (%s): %d neu, %d schon vorhanden, %d Fehler – beim nächsten Einstecken werden sie erneut versucht", r.Card, r.Created, r.Dup, r.Failed)
+		fmt.Fprintf(&b, "⚠️ Import with errors (%s): %d new, %d already there, %d errors – they are retried the next time the card is inserted", r.Card, r.Created, r.Dup, r.Failed)
 	}
 	if r.Known > 0 {
-		fmt.Fprintf(&b, "\n%d Dateien schon früher importiert, übersprungen", r.Known)
+		fmt.Fprintf(&b, "\n%d files imported earlier, skipped", r.Known)
 	}
 	if r.Trashed > 0 {
-		fmt.Fprintf(&b, "\n%d davon liegen in Immich im Papierkorb", r.Trashed)
+		fmt.Fprintf(&b, "\n%d of them are in Immich's trash", r.Trashed)
 	}
 	if r.Rejected > 0 {
-		fmt.Fprintf(&b, "\n%d Dateien lehnt Immich ab (Format nicht unterstützt)", r.Rejected)
+		fmt.Fprintf(&b, "\n%d files rejected by Immich (unsupported format)", r.Rejected)
 	}
 	if r.Album != "" {
-		fmt.Fprintf(&b, "\nAlbum: %s (%d neu hinzugefügt)", r.Album, len(r.CreatedIDs))
+		fmt.Fprintf(&b, "\nAlbum: %s (%d newly added)", r.Album, len(r.CreatedIDs))
 	}
 	for _, e := range r.Errors {
 		fmt.Fprintf(&b, "\n• %s", e)
 	}
 	if !r.Canceled {
-		b.WriteString("\nKarte kann abgezogen werden.")
+		b.WriteString("\nThe card can be removed.")
 	}
 	return b.String()
 }
 
-func (a *App) lastPath() string { return filepath.Join(a.Cfg.ConfigDir, "letzter.txt") }
+func (a *App) lastPath() string { return filepath.Join(a.Cfg.ConfigDir, LastFile) }
 
 func (a *App) saveLast(msg string) {
 	_ = os.WriteFile(a.lastPath(), []byte(time.Now().Format("2006-01-02 15:04")+"\n"+msg+"\n"), 0o644)
 }
 
-// chooseAlbum bestimmt den Albumnamen nach ALBUM_MODE; bei "ask" per Telegram.
+// chooseAlbum picks the album name according to ALBUM_MODE; asks via
+// Telegram for "ask".
 func (a *App) chooseAlbum(ctx context.Context, card string, n int) string {
 	def := "Import " + time.Now().Format("2006-01-02")
 	switch a.Cfg.AlbumMode {
@@ -207,7 +239,7 @@ func (a *App) chooseAlbum(ctx context.Context, card string, n int) string {
 		a.answer = nil
 		a.mu.Unlock()
 	}()
-	a.notify(fmt.Sprintf("📷 Karte erkannt: %d neue Dateien von %s%s\nIn welches Album? Antworte mit dem Namen oder /kein.\nOhne Antwort in %d Min: „%s“",
+	a.notify(fmt.Sprintf("📷 Card detected: %d new files on %s%s\nWhich album? Reply with a name or /none.\nNo reply within %d min: “%s”",
 		n, card, a.mode(), int(a.Cfg.AlbumAskTimeout.Minutes()), def))
 	select {
 	case ans := <-ch:
@@ -219,7 +251,7 @@ func (a *App) chooseAlbum(ctx context.Context, card string, n int) string {
 	}
 }
 
-// answerAlbum gibt die Antwort an eine laufende Albumfrage weiter.
+// answerAlbum passes the answer on to a pending album question.
 func (a *App) answerAlbum(name string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -234,27 +266,27 @@ func (a *App) answerAlbum(name string) bool {
 	return true
 }
 
-// runStack stapelt RAW+Bild-Paare. Fehlt Immich noch das Aufnahmedatum, wird
-// es nach StackRetryDelay erneut versucht, solange retries übrig sind.
-// auto: nach einem Import gestartet – ohne Paare dann keine eigene Meldung.
+// runStack stacks RAW+image pairs. If Immich still lacks the capture date,
+// it tries again after StackRetryDelay as long as retries are left.
+// auto: started after an import – then no message of its own without pairs.
 func (a *App) runStack(ctx context.Context, since *time.Time, retries int, auto bool) {
 	if !a.stackMu.TryLock() {
 		if retries > 0 {
 			time.AfterFunc(a.StackRetryDelay, func() { a.runStack(ctx, since, retries, auto) })
 		} else {
-			a.notify("🗂️ Stapeln läuft bereits.")
+			a.notify("🗂️ Stacking is already running.")
 		}
 		return
 	}
 	defer a.stackMu.Unlock()
 
-	scope := "ganze Bibliothek"
+	scope := "whole library"
 	if since != nil {
-		scope = "seit " + since.Local().Format("2006-01-02 15:04")
+		scope = "since " + since.Local().Format("2006-01-02 15:04")
 	}
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := &stackState{start: time.Now(), scope: scope, progress: "wird gestartet …", cancel: cancel}
+	st := &stackState{start: time.Now(), scope: scope, progress: "starting …", cancel: cancel}
 	a.mu.Lock()
 	a.stackInfo = st
 	a.mu.Unlock()
@@ -264,7 +296,7 @@ func (a *App) runStack(ctx context.Context, since *time.Time, retries int, auto 
 		a.mu.Unlock()
 	}()
 
-	a.Log.Printf("Stapeln (%s) gestartet", scope)
+	a.Log.Printf("stacking (%s) started", scope)
 	res, err := stack.Run(sctx, a.Immich, since, a.Cfg.StackTolerance, a.Cfg.StackCover, a.Cfg.DryRun,
 		func(s string) {
 			a.mu.Lock()
@@ -273,29 +305,29 @@ func (a *App) runStack(ctx context.Context, since *time.Time, retries int, auto 
 		})
 	if err != nil {
 		if sctx.Err() != nil {
-			a.notify(fmt.Sprintf("⏹️ Stapeln (%s) abgebrochen: %d Stapel angelegt", scope, res.Created))
+			a.notify(fmt.Sprintf("⏹️ Stacking (%s) cancelled: %d stacks created", scope, res.Created))
 		} else {
-			a.notify(fmt.Sprintf("❌ Stapeln (%s) fehlgeschlagen: %v", scope, err))
+			a.notify(fmt.Sprintf("❌ Stacking (%s) failed: %v", scope, err))
 		}
 		return
 	}
-	msg := fmt.Sprintf("🗂️ Stapeln (%s)%s: %d von %d Paaren gestapelt", scope, a.mode(), res.Created, res.Pairs)
+	msg := fmt.Sprintf("🗂️ Stacking (%s)%s: %d of %d pairs stacked", scope, a.mode(), res.Created, res.Pairs)
 	if a.Cfg.DryRun {
-		msg = fmt.Sprintf("🗂️ Stapeln (%s, Probelauf): %d Paare gefunden", scope, res.Pairs)
+		msg = fmt.Sprintf("🗂️ Stacking (%s, dry run): %d pairs found", scope, res.Pairs)
 	}
 	if res.Ambiguous > 0 {
-		msg += fmt.Sprintf("\n%d mehrdeutig, übersprungen (z.B. HIF+JPG+ARW mit gleichem Namen)", res.Ambiguous)
+		msg += fmt.Sprintf("\n%d ambiguous, skipped (e.g. HIF+JPG+ARW with the same name)", res.Ambiguous)
 	}
 	if res.Errors > 0 {
-		msg += fmt.Sprintf("\n❌ %d Fehler:\n%s", res.Errors, strings.Join(res.ErrorSamples, "\n"))
+		msg += fmt.Sprintf("\n❌ %d errors:\n%s", res.Errors, strings.Join(res.ErrorSamples, "\n"))
 	}
 	if res.NoDate > 0 {
 		if retries > 0 {
-			msg += fmt.Sprintf("\n%d Dateinamen noch ohne Aufnahmedatum (Immich liest Metadaten noch) – neuer Versuch in %d Min.",
+			msg += fmt.Sprintf("\n%d file names still without a capture date (Immich is still reading metadata) – trying again in %d min.",
 				res.NoDate, int(a.StackRetryDelay.Minutes()))
 			time.AfterFunc(a.StackRetryDelay, func() { a.runStack(ctx, since, retries-1, auto) })
 		} else {
-			msg += fmt.Sprintf("\n%d Dateinamen ohne Aufnahmedatum – später mit /stapeln erneut versuchen.", res.NoDate)
+			msg += fmt.Sprintf("\n%d file names without a capture date – try again later with /stack.", res.NoDate)
 		}
 	}
 	if auto && res.Pairs == 0 && res.NoDate == 0 && res.Errors == 0 {

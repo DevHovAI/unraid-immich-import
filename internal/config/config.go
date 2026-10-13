@@ -1,5 +1,5 @@
-// Package config liest die Einstellungen aus Umgebungsvariablen. Die Namen
-// sind dieselben wie in der Skript-Version (camera-import-install).
+// Package config reads the settings from environment variables. The names
+// are the same as in the script version (camera-import-install).
 package config
 
 import (
@@ -17,26 +17,26 @@ type Config struct {
 	APIKey    string
 
 	TGToken string
-	TGChat  int64 // 0 = Telegram aus
+	TGChat  int64 // 0 = Telegram off
 
 	AlbumMode       string // ask, date, fixed, none
 	Album           string
 	AlbumAskTimeout time.Duration
 
 	DryRun        bool
-	ProgressSteps []int // Prozentmarken für Zwischenstände
+	ProgressSteps []int // percentages for progress messages
 
 	StackPairs     bool
-	StackCover     string // display oder raw
+	StackCover     string // display or raw
 	StackTolerance time.Duration
 
-	DisksDir     string // hier hängt Unassigned Devices die Karten ein
-	ConfigDir    string // Gedächtnis, Log, letzter Import
+	DisksDir     string // where Unassigned Devices mounts the cards
+	ConfigDir    string // memory, log, last import
 	PollInterval time.Duration
-	Parallel     int // gleichzeitige Uploads
+	Parallel     int // concurrent uploads
 }
 
-// Load liest die Einstellungen über getenv (os.Getenv, in Tests eine Map).
+// Load reads the settings via getenv (os.Getenv, a map in tests).
 func Load(getenv func(string) string) (Config, error) {
 	get := func(k, def string) string {
 		if v := strings.TrimSpace(getenv(k)); v != "" {
@@ -49,7 +49,7 @@ func Load(getenv func(string) string) (Config, error) {
 		s := get(k, strconv.Itoa(def))
 		n, err := strconv.Atoi(s)
 		if err != nil || n < min {
-			errs = append(errs, fmt.Errorf("%s=%q ist keine Zahl ≥ %d", k, s, min))
+			errs = append(errs, fmt.Errorf("%s=%q is not a number ≥ %d", k, s, min))
 			return def
 		}
 		return n
@@ -61,7 +61,7 @@ func Load(getenv func(string) string) (Config, error) {
 		case "0", "false", "no", "nein":
 			return false
 		default:
-			errs = append(errs, fmt.Errorf("%s=%q: 0 oder 1 erwartet", k, s))
+			errs = append(errs, fmt.Errorf("%s=%q: expected 0 or 1", k, s))
 			return def == "1"
 		}
 	}
@@ -84,41 +84,41 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	if c.ImmichURL == "" {
-		errs = append(errs, errors.New("IMMICH_URL fehlt (z.B. http://<server-ip>:2283)"))
+		errs = append(errs, errors.New("IMMICH_URL is missing (e.g. http://<server-ip>:2283)"))
 	} else if u, err := url.Parse(c.ImmichURL); err != nil || u.Scheme == "" || u.Host == "" {
-		errs = append(errs, fmt.Errorf("IMMICH_URL=%q ist keine Adresse wie http://<server-ip>:2283", c.ImmichURL))
+		errs = append(errs, fmt.Errorf("IMMICH_URL=%q is not an address like http://<server-ip>:2283", c.ImmichURL))
 	}
 	if c.APIKey == "" {
-		errs = append(errs, errors.New("IMMICH_API_KEY fehlt"))
+		errs = append(errs, errors.New("IMMICH_API_KEY is missing"))
 	}
 	if chat := get("TG_CHAT_ID", ""); chat != "" {
 		n, err := strconv.ParseInt(chat, 10, 64)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("TG_CHAT_ID=%q ist keine Zahl", chat))
+			errs = append(errs, fmt.Errorf("TG_CHAT_ID=%q is not a number", chat))
 		}
 		c.TGChat = n
 	}
 	if (c.TGToken == "") != (c.TGChat == 0) {
-		errs = append(errs, errors.New("für Telegram TG_BOT_TOKEN und TG_CHAT_ID beide setzen (oder beide leer lassen)"))
+		errs = append(errs, errors.New("for Telegram, set both TG_BOT_TOKEN and TG_CHAT_ID (or leave both empty)"))
 	}
 	switch c.AlbumMode {
 	case "ask", "date", "fixed", "none":
 	default:
-		errs = append(errs, fmt.Errorf("ALBUM_MODE=%q: ask, date, fixed oder none", c.AlbumMode))
+		errs = append(errs, fmt.Errorf("ALBUM_MODE=%q: ask, date, fixed or none", c.AlbumMode))
 	}
 	if c.AlbumMode == "fixed" && c.Album == "" {
-		errs = append(errs, errors.New("ALBUM_MODE=fixed braucht IMMICH_ALBUM"))
+		errs = append(errs, errors.New("ALBUM_MODE=fixed needs IMMICH_ALBUM"))
 	}
 	if c.AlbumMode == "ask" && c.TGToken == "" {
-		c.AlbumMode = "date" // ohne Bot kann niemand antworten
+		c.AlbumMode = "date" // without a bot nobody can answer
 	}
 	if c.StackCover != "display" && c.StackCover != "raw" {
-		errs = append(errs, fmt.Errorf("STACK_COVER=%q: display oder raw", c.StackCover))
+		errs = append(errs, fmt.Errorf("STACK_COVER=%q: display or raw", c.StackCover))
 	}
 	for _, f := range strings.Fields(get("PROGRESS_STEPS", "25 50 75")) {
 		n, err := strconv.Atoi(f)
 		if err != nil || n <= 0 || n >= 100 {
-			errs = append(errs, fmt.Errorf("PROGRESS_STEPS: %q ist keine Zahl zwischen 1 und 99", f))
+			errs = append(errs, fmt.Errorf("PROGRESS_STEPS: %q is not a number between 1 and 99", f))
 			continue
 		}
 		c.ProgressSteps = append(c.ProgressSteps, n)

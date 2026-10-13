@@ -21,21 +21,21 @@ func TestDefaults(t *testing.T) {
 	if c.ImmichURL != "http://immich:2283" || c.TGChat != 42 || c.AlbumMode != "ask" ||
 		c.AlbumAskTimeout != 2*time.Minute || c.StackTolerance != 2*time.Second ||
 		c.DryRun || !c.StackPairs || c.Parallel != 2 || len(c.ProgressSteps) != 3 {
-		t.Fatalf("unerwartet: %+v", c)
+		t.Fatalf("unexpected: %+v", c)
 	}
 }
 
 func TestErrors(t *testing.T) {
 	_, err := Load(env(map[string]string{
 		"IMMICH_URL": "immich", "TG_CHAT_ID": "x", "ALBUM_MODE": "wild",
-		"DRY_RUN": "vielleicht", "PROGRESS_STEPS": "50 150",
+		"DRY_RUN": "maybe", "PROGRESS_STEPS": "50 150",
 	}))
 	if err == nil {
-		t.Fatal("Fehler erwartet")
+		t.Fatal("expected an error")
 	}
 	for _, want := range []string{"IMMICH_URL", "IMMICH_API_KEY", "TG_CHAT_ID", "ALBUM_MODE", "DRY_RUN", "150"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("Meldung zu %s fehlt in:\n%v", want, err)
+			t.Errorf("message about %s missing in:\n%v", want, err)
 		}
 	}
 }

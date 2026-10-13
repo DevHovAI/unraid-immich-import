@@ -30,29 +30,29 @@ func at(sec int) *time.Time {
 func TestPairs(t *testing.T) {
 	c := NewCollector()
 	c.Add([]immich.Asset{
-		// normales Paar
+		// normal pair
 		asset("r1", "DSC00001.ARW", at(0), "ILCE-7M4", false),
 		asset("h1", "DSC00001.HIF", at(1), "ILCE-7M4", false),
-		// zu weit auseinander
+		// too far apart
 		asset("r2", "DSC00002.ARW", at(0), "ILCE-7M4", false),
 		asset("h2", "DSC00002.HIF", at(10), "ILCE-7M4", false),
-		// andere Kamera, gleicher Name
+		// other camera, same name
 		asset("r3", "DSC00003.ARW", at(0), "ILCE-7M4", false),
 		asset("h3", "DSC00003.HIF", at(0), "ILCE-6400", false),
-		// mehrdeutig: HIF und JPG zum selben RAW
+		// ambiguous: HIF and JPG for the same RAW
 		asset("r4", "DSC00004.ARW", at(0), "ILCE-7M4", false),
 		asset("h4", "DSC00004.HIF", at(0), "ILCE-7M4", false),
 		asset("j4", "DSC00004.JPG", at(0), "ILCE-7M4", false),
-		// schon gestapelt
+		// already stacked
 		asset("r5", "DSC00005.ARW", at(0), "ILCE-7M4", true),
 		asset("h5", "DSC00005.HIF", at(0), "ILCE-7M4", true),
-		// noch ohne Aufnahmedatum
+		// no capture date yet
 		asset("r6", "DSC00006.ARW", nil, "", false),
 		asset("h6", "dsc00006.hif", at(0), "ILCE-7M4", false),
 	})
 	pairs, st := c.Pairs(2*time.Second, "display")
 	if len(pairs) != 1 || pairs[0].Primary != "h1" || pairs[0].Other != "r1" {
-		t.Fatalf("Paare: %+v", pairs)
+		t.Fatalf("pairs: %+v", pairs)
 	}
 	if st.Ambiguous != 1 || st.NoDate != 1 {
 		t.Fatalf("Stats: %+v", st)

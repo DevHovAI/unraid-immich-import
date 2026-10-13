@@ -24,10 +24,10 @@ func TestPersistAndReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !s.Has(k1) || !s.Has(k2) || s.Len() != 2 {
-		t.Fatalf("nach Neustart: Len=%d", s.Len())
+		t.Fatalf("after restart: Len=%d", s.Len())
 	}
 	if s.Has(Key("DSC00001.ARW", 101, time.Unix(1700000000, 0))) {
-		t.Fatal("andere Größe darf nicht als bekannt gelten")
+		t.Fatal("a different size must not count as known")
 	}
 	if err := s.Reset(); err != nil {
 		t.Fatal(err)
@@ -36,6 +36,6 @@ func TestPersistAndReset(t *testing.T) {
 	s.Close()
 	s, _ = Open(p)
 	if s.Has(k1) || !s.Has(k2) {
-		t.Fatal("Reset hat nicht gewirkt")
+		t.Fatal("Reset had no effect")
 	}
 }

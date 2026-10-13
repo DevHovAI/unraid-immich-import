@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// Logger schreibt nach stdout (Docker-Log) und in eine Datei für /log.
-// Ab 1 MB wird die Datei nach .1 verschoben.
+// Logger writes to stdout (Docker log) and to a file for /log.
+// Above 1 MB the file is moved to .1.
 type Logger struct {
 	mu   sync.Mutex
 	path string
@@ -40,13 +40,13 @@ func (l *Logger) Printf(format string, args ...any) {
 	}
 }
 
-// Tail liefert die letzten n Zeilen, jede höchstens width Zeichen lang.
+// Tail returns the last n lines, each at most width characters long.
 func (l *Logger) Tail(n, width int) string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	f, err := os.Open(l.path)
 	if err != nil {
-		return "(noch leer)"
+		return "(empty so far)"
 	}
 	defer f.Close()
 	var lines []string
@@ -63,7 +63,7 @@ func (l *Logger) Tail(n, width int) string {
 		}
 	}
 	if len(lines) == 0 {
-		return "(noch leer)"
+		return "(empty so far)"
 	}
 	return strings.Join(lines, "\n")
 }

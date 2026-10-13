@@ -11,7 +11,7 @@ import (
 	"github.com/DevHovAI/unraid-immich-import/internal/memory"
 )
 
-// Endungen, die importiert werden (Fotos, RAW, Videos)
+// Extensions that are imported (photos, RAW, videos)
 var mediaExt = map[string]bool{}
 
 func init() {
@@ -22,11 +22,11 @@ func init() {
 }
 
 type Card struct {
-	Label string // Name des Einhängepunkts, z.B. die Datenträgerbezeichnung
+	Label string // name of the mount point, e.g. the volume label
 	Root  string
 }
 
-// Dirs: DCIM und bei Sony-Videos PRIVATE/M4ROOT/CLIP
+// Dirs: DCIM and, for Sony videos, PRIVATE/M4ROOT/CLIP
 func (c Card) Dirs() []string {
 	dirs := []string{filepath.Join(c.Root, "DCIM")}
 	clip := filepath.Join(c.Root, "PRIVATE", "M4ROOT", "CLIP")
@@ -36,7 +36,7 @@ func (c Card) Dirs() []string {
 	return dirs
 }
 
-// FindCards liefert alle eingehängten Datenträger mit DCIM-Ordner.
+// FindCards returns all mounted volumes with a DCIM folder.
 func FindCards(disksDir string) []Card {
 	entries, err := os.ReadDir(disksDir)
 	if err != nil {
@@ -61,7 +61,7 @@ type File struct {
 
 func (f File) Key() string { return memory.Key(f.Name, f.Size, f.MTime) }
 
-// Scan sammelt die Mediendateien der Karte, ohne sie zu lesen (nur stat).
+// Scan collects the card's media files without reading them (stat only).
 func Scan(c Card) ([]File, error) {
 	var files []File
 	for _, dir := range c.Dirs() {

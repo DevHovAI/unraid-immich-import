@@ -26,14 +26,14 @@ func TestPollAndSend(t *testing.T) {
 			calls++
 			var res any = []any{}
 			switch calls {
-			case 1: // alte Nachricht vor dem Start
-				res = []map[string]any{{"update_id": 5, "message": map[string]any{"chat": map[string]any{"id": 1}, "text": "/alt"}}}
+			case 1: // old message from before the start
+				res = []map[string]any{{"update_id": 5, "message": map[string]any{"chat": map[string]any{"id": 1}, "text": "/old"}}}
 			case 2:
 				if r.Form.Get("offset") != "6" {
 					t.Errorf("offset = %s", r.Form.Get("offset"))
 				}
 				res = []map[string]any{
-					{"update_id": 6, "message": map[string]any{"chat": map[string]any{"id": 99}, "text": "/fremd"}},
+					{"update_id": 6, "message": map[string]any{"chat": map[string]any{"id": 99}, "text": "/foreign"}},
 					{"update_id": 7, "message": map[string]any{"chat": map[string]any{"id": 1}, "text": " /status "}},
 				}
 			default:
@@ -51,11 +51,11 @@ func TestPollAndSend(t *testing.T) {
 	var got []string
 	b.Poll(ctx, func(s string) { got = append(got, s); b.Send("echo " + s) })
 	if len(got) != 1 || got[0] != "/status" {
-		t.Fatalf("empfangen: %v", got)
+		t.Fatalf("received: %v", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if len(sent) != 1 || sent[0] != "echo /status" {
-		t.Fatalf("gesendet: %v", sent)
+		t.Fatalf("sent: %v", sent)
 	}
 }

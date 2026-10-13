@@ -1,12 +1,12 @@
-// Package stack stapelt zusammengehörige RAW- und Bild-Dateien in Immich
-// (z.B. DSC01234.ARW + DSC01234.HIF), auch für früher hochgeladene Bilder.
+// Package stack stacks matching RAW and image files in Immich
+// (e.g. DSC01234.ARW + DSC01234.HIF), also for photos uploaded earlier.
 //
-// Ein Paar entsteht nur, wenn
-//   - der Dateiname ohne Endung gleich ist,
-//   - die Aufnahmezeiten höchstens die Toleranz auseinanderliegen,
-//   - das Kameramodell gleich ist (wenn beide eins haben),
-//   - die Zuordnung eindeutig ist (genau ein Partner auf beiden Seiten),
-//   - keine der beiden Dateien schon in einem Stapel liegt.
+// A pair is only formed if
+//   - the file name without extension is the same,
+//   - the capture times are at most the tolerance apart,
+//   - the camera model is the same (if both have one),
+//   - the match is unique (exactly one partner on both sides),
+//   - neither file is already in a stack.
 package stack
 
 import (
@@ -32,13 +32,13 @@ func set(xs ...string) map[string]bool {
 type file struct {
 	id, name string
 	raw      bool
-	taken    *time.Time // nur das von Immich ausgelesene Aufnahmedatum
+	taken    *time.Time // only the capture date read by Immich
 	camera   string
 	stacked  bool
 }
 
-// Collector sammelt Dateien seitenweise, damit nicht die ganze Bibliothek als
-// Asset-Strukturen im Speicher liegt.
+// Collector collects files page by page, so the whole library doesn't sit in
+// memory as asset structs.
 type Collector struct {
 	groups map[string][]file
 	Seen   int
@@ -67,13 +67,13 @@ func (c *Collector) Add(assets []immich.Asset) {
 }
 
 type Pair struct {
-	Primary, Other         string // Asset-IDs, Primary liegt vorne
+	Primary, Other         string // asset IDs, Primary is on top
 	PrimaryName, OtherName string
 }
 
 type Stats struct {
-	Ambiguous int // mehrere mögliche Partner
-	NoDate    int // Dateinamen, bei denen Immich das Aufnahmedatum noch fehlt
+	Ambiguous int // several possible partners
+	NoDate    int // file names for which Immich still lacks the capture date
 }
 
 func matches(r, i file, tol time.Duration) bool {
@@ -90,7 +90,7 @@ func matches(r, i file, tol time.Duration) bool {
 	return r.camera == "" || i.camera == "" || r.camera == i.camera
 }
 
-// Pairs bildet die Paare. cover "raw" legt die RAW-Datei nach vorne.
+// Pairs forms the pairs. cover "raw" puts the RAW file on top.
 func (c *Collector) Pairs(tol time.Duration, cover string) ([]Pair, Stats) {
 	var pairs []Pair
 	var st Stats
@@ -110,7 +110,7 @@ func (c *Collector) Pairs(tol time.Duration, cover string) ([]Pair, Stats) {
 		if len(raws) == 0 || len(imgs) == 0 {
 			continue
 		}
-		// Ohne Aufnahmedatum lässt sich nicht sicher paaren; später erneut versuchen
+		// Without a capture date pairing isn't safe; try again later
 		if undated {
 			st.NoDate++
 			continue
@@ -129,7 +129,7 @@ func (c *Collector) Pairs(tol time.Duration, cover string) ([]Pair, Stats) {
 				continue
 			}
 			i := cand[0]
-			// Gegenprobe: das Bild darf nur zu diesem einen RAW passen
+			// Cross-check: the image may only match this one RAW
 			back := 0
 			for _, x := range raws {
 				if matches(x, i, tol) {

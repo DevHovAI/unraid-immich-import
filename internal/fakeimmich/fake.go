@@ -1,4 +1,4 @@
-// Package fakeimmich ist ein nachgebautes Immich für Tests.
+// Package fakeimmich is a fake Immich for tests.
 package fakeimmich
 
 import (
@@ -22,15 +22,15 @@ type Asset struct {
 type Server struct {
 	*httptest.Server
 	mu        sync.Mutex
-	Assets    map[string]*Asset   // nach Checksumme
-	Albums    map[string][]string // Name → IDs
+	Assets    map[string]*Asset   // by checksum
+	Albums    map[string][]string // name → IDs
 	Stacks    [][]string
-	Fail      map[string]bool // Dateinamen, deren Upload mit 500 scheitert
-	Delay     time.Duration   // je Upload
+	Fail      map[string]bool // file names whose upload fails with 500
+	Delay     time.Duration   // per upload
 	Uploads   int
 	Checked   int
 	nextID    int
-	albumName map[string]string // ID → Name
+	albumName map[string]string // ID → name
 }
 
 func New() *Server {
@@ -40,7 +40,7 @@ func New() *Server {
 	return s
 }
 
-// Have legt eine Datei an, als wäre sie schon früher hochgeladen worden.
+// Have adds a file as if it had been uploaded earlier.
 func (s *Server) Have(name string, content []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,7 +91,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.FormValue("fileCreatedAt") == "" {
-			js(400, map[string]string{"message": "fileCreatedAt fehlt"})
+			js(400, map[string]string{"message": "fileCreatedAt missing"})
 			return
 		}
 		if s.Delay > 0 {
@@ -107,7 +107,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.Uploads++
 		if s.Fail[hdr.Filename] {
 			s.mu.Unlock()
-			js(500, map[string]string{"message": "kaputt"})
+			js(500, map[string]string{"message": "broken"})
 			s.mu.Lock()
 			return
 		}
@@ -174,10 +174,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		js(201, map[string]string{"id": "stack"})
 
 	default:
-		js(404, map[string]string{"message": "unbekannt " + r.Method + " " + r.URL.Path})
+		js(404, map[string]string{"message": "unknown " + r.Method + " " + r.URL.Path})
 	}
 }
 
-// Lock/Unlock für Tests, die Felder lesen
+// Lock/Unlock for tests that read fields
 func (s *Server) Lock()   { s.mu.Lock() }
 func (s *Server) Unlock() { s.mu.Unlock() }
