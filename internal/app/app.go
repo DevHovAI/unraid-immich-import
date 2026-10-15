@@ -128,9 +128,20 @@ func (a *App) watch(ctx context.Context) {
 	done := map[string]bool{}
 	t := time.NewTicker(a.Cfg.PollInterval)
 	defer t.Stop()
+	last := ""
 	for {
+		cards, seen := importer.FindCards(a.Cfg.DisksDir)
+		// Log what is mounted whenever it changes: explains a card that is
+		// visible on the host but not imported
+		if s := strings.Join(seen, ", "); s != last {
+			last = s
+			if s == "" {
+				s = "empty"
+			}
+			a.Log.Printf("%s: %s", a.Cfg.DisksDir, s)
+		}
 		present := map[string]bool{}
-		for _, c := range importer.FindCards(a.Cfg.DisksDir) {
+		for _, c := range cards {
 			present[c.Root] = true
 			if done[c.Root] || ctx.Err() != nil {
 				continue

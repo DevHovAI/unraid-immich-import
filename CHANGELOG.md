@@ -1,12 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0-beta.2] – 2026-10-16
 
 ### Changed
 - camera-import now speaks English: Telegram messages, commands, log, error messages, container template and README
 - Bot commands are now `/cancel`, `/last`, `/stack`, `/none`, `/forget` and `/help`. The German commands still work.
 - The files in appdata are now called `imported.txt` and `last.txt`; the old ones are renamed on the first start, nothing is lost
 - Sizes use a decimal point (1.5 GB)
+
+### Fixed
+- Telegram answers could take minutes: a silently dropped connection kept every following request hanging. The bot now uses a fresh connection after a failed request and polls with a shorter timeout.
+- The log shows what the container sees under `/mnt/disks` and why an entry is not imported (no `DCIM`, no permission), instead of staying silent
 
 ## [2.0.0-beta.1] – 2026-10-12
 

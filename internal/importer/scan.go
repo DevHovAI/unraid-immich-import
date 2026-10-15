@@ -1,6 +1,8 @@
 package importer
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,20 +38,34 @@ func (c Card) Dirs() []string {
 	return dirs
 }
 
-// FindCards returns all mounted volumes with a DCIM folder.
-func FindCards(disksDir string) []Card {
+// FindCards returns all mounted volumes with a DCIM folder. seen describes
+// every entry of disksDir with the reason it was skipped, so the log can show
+// why a mounted card is not picked up.
+func FindCards(disksDir string) (cards []Card, seen []string) {
 	entries, err := os.ReadDir(disksDir)
 	if err != nil {
-		return nil
+		return nil, []string{err.Error()}
 	}
-	var cards []Card
 	for _, e := range entries {
 		root := filepath.Join(disksDir, e.Name())
-		if st, err := os.Stat(filepath.Join(root, "DCIM")); err == nil && st.IsDir() {
+		st, err := os.Stat(filepath.Join(root, "DCIM"))
+		switch {
+		case err == nil && st.IsDir():
 			cards = append(cards, Card{Label: e.Name(), Root: root})
+			seen = append(seen, e.Name()+" (card)")
+		case err == nil:
+			seen = append(seen, e.Name()+" (DCIM is not a folder)")
+		case errors.Is(err, fs.ErrNotExist):
+			seen = append(seen, e.Name()+" (no DCIM)")
+		default:
+			var pe *fs.PathError
+			if errors.As(err, &pe) {
+				err = pe.Err // the path is already in the name
+			}
+			seen = append(seen, fmt.Sprintf("%s (%v)", e.Name(), err))
 		}
 	}
-	return cards
+	return cards, seen
 }
 
 type File struct {

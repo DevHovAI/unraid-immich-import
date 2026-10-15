@@ -76,7 +76,7 @@ In the camera menu, set the USB connection to **Mass Storage (MSC)**. In MTP mod
 ## Troubleshooting
 
 - Log: Docker → `camera-import` → **Logs**, or `/log` in the bot. The file is `appdata/camera-import/camera-import.log`.
-- Nothing happens when you insert the card: does Unassigned Devices mount it? Under Main → Unassigned Devices it must show as "mounted", and there must be files under `/mnt/disks/<name>/DCIM`. Otherwise **Automount** is not turned on.
+- Nothing happens when you insert the card: does Unassigned Devices mount it? Under Main → Unassigned Devices it must show as "mounted", and there must be files under `/mnt/disks/<name>/DCIM`. Otherwise **Automount** is not turned on. The log shows what the container sees, e.g. `/mnt/disks: Sony_DSC (permission denied)` or `/mnt/disks: empty`. If the card is mounted on the host but missing in that line, check that the container path `/mnt/disks` uses access mode **Read Only - Slave**.
 - "not allowed to read the card": in Unassigned Devices, turn **Read Only** off and on again for the card so it is mounted again. If that doesn't help, set **PUID = 0** in the container template (Advanced View).
 - The memory is `appdata/camera-import/imported.txt`, one line per file. Files from 2.0.0-beta.1 (`importiert.txt`, `letzter.txt`) are renamed on the first start.
 

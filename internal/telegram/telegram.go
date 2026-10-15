@@ -5,6 +5,7 @@ package telegram
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,9 +23,21 @@ type Bot struct {
 	Log   func(format string, args ...any)
 }
 
+// pollSeconds is the long-polling timeout. Short enough that a connection
+// that silently died (NAT, router) is noticed after pollSeconds+15 s.
+const pollSeconds = 25
+
 func New(token string, chat int64, logf func(string, ...any)) *Bot {
+	// HTTP/1.1 only: with HTTP/2 every request shares one connection, and when
+	// that connection dies silently, each following request hangs until the
+	// timeout too (seen on Unraid: answers after 4 minutes). HTTP/1.1 drops a
+	// timed-out connection, so the next request dials a fresh one.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ForceAttemptHTTP2 = false
+	tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	tr.IdleConnTimeout = 60 * time.Second
 	return &Bot{Token: token, Chat: chat, API: "https://api.telegram.org",
-		HTTP: &http.Client{Timeout: 70 * time.Second}, Log: logf}
+		HTTP: &http.Client{Timeout: (pollSeconds + 15) * time.Second, Transport: tr}, Log: logf}
 }
 
 func (b *Bot) Enabled() bool { return b != nil && b.Token != "" && b.Chat != 0 }
@@ -113,7 +126,7 @@ func (b *Bot) Poll(ctx context.Context, handle func(text string)) {
 	for ctx.Err() == nil {
 		var ups []update
 		err := b.call(ctx, "getUpdates", url.Values{
-			"offset": {strconv.FormatInt(offset, 10)}, "timeout": {"50"},
+			"offset": {strconv.FormatInt(offset, 10)}, "timeout": {strconv.Itoa(pollSeconds)},
 			"allowed_updates": {`["message"]`},
 		}, &ups)
 		if err != nil {
@@ -123,12 +136,13 @@ func (b *Bot) Poll(ctx context.Context, handle func(text string)) {
 			if b.Log != nil {
 				b.Log("Telegram poll: %v", err)
 			}
+			b.HTTP.CloseIdleConnections()
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(backoff):
 			}
-			backoff = min(backoff*2, 5*time.Minute)
+			backoff = min(backoff*2, time.Minute)
 			continue
 		}
 		backoff = time.Second
