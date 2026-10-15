@@ -154,14 +154,14 @@ func TestFindCards(t *testing.T) {
 	disks := t.TempDir()
 	os.MkdirAll(filepath.Join(disks, "SONY", "DCIM"), 0o755)
 	os.MkdirAll(filepath.Join(disks, "BACKUP", "data"), 0o755)
-	cards, seen := FindCards(disks)
+	cards, seen, broken := FindCards(disks)
 	if len(cards) != 1 || cards[0].Label != "SONY" {
 		t.Fatalf("%+v", cards)
 	}
-	if strings.Join(seen, ", ") != "BACKUP (no DCIM), SONY (card)" {
-		t.Fatalf("%q", seen)
+	if strings.Join(seen, ", ") != "BACKUP (no DCIM), SONY (card)" || broken != nil {
+		t.Fatalf("%q %q", seen, broken)
 	}
-	if _, seen := FindCards(filepath.Join(disks, "missing")); len(seen) != 1 {
-		t.Fatalf("%q", seen)
+	if _, _, broken := FindCards(filepath.Join(disks, "missing")); len(broken) != 1 {
+		t.Fatalf("%q", broken)
 	}
 }

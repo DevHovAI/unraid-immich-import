@@ -33,8 +33,10 @@ func New(token string, chat int64, logf func(string, ...any)) *Bot {
 	// timeout too (seen on Unraid: answers after 4 minutes). HTTP/1.1 drops a
 	// timed-out connection, so the next request dials a fresh one.
 	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.ForceAttemptHTTP2 = false
-	tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	tr.Protocols = new(http.Protocols)
+	tr.Protocols.SetHTTP1(true)
+	// The clone may carry "h2" in ALPN once the default transport was used
+	tr.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}}
 	tr.IdleConnTimeout = 60 * time.Second
 	return &Bot{Token: token, Chat: chat, API: "https://api.telegram.org",
 		HTTP: &http.Client{Timeout: (pollSeconds + 15) * time.Second, Transport: tr}, Log: logf}

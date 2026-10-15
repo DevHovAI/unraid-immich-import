@@ -40,11 +40,12 @@ func (c Card) Dirs() []string {
 
 // FindCards returns all mounted volumes with a DCIM folder. seen describes
 // every entry of disksDir with the reason it was skipped, so the log can show
-// why a mounted card is not picked up.
-func FindCards(disksDir string) (cards []Card, seen []string) {
+// why a mounted card is not picked up. broken lists the entries that could
+// not be read at all, e.g. a stale mount after the camera was unplugged.
+func FindCards(disksDir string) (cards []Card, seen, broken []string) {
 	entries, err := os.ReadDir(disksDir)
 	if err != nil {
-		return nil, []string{err.Error()}
+		return nil, []string{err.Error()}, []string{err.Error()}
 	}
 	for _, e := range entries {
 		root := filepath.Join(disksDir, e.Name())
@@ -63,9 +64,10 @@ func FindCards(disksDir string) (cards []Card, seen []string) {
 				err = pe.Err // the path is already in the name
 			}
 			seen = append(seen, fmt.Sprintf("%s (%v)", e.Name(), err))
+			broken = append(broken, seen[len(seen)-1])
 		}
 	}
-	return cards, seen
+	return cards, seen, broken
 }
 
 type File struct {

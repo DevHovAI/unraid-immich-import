@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -57,5 +58,32 @@ func TestPollAndSend(t *testing.T) {
 	defer mu.Unlock()
 	if len(sent) != 1 || sent[0] != "echo /status" {
 		t.Fatalf("sent: %v", sent)
+	}
+}
+
+// The bot must speak HTTP/1.1 even when the server offers HTTP/2. On the
+// server, the cloned default transport still offered "h2" via ALPN.
+func TestHTTP1Only(t *testing.T) {
+	var proto int
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proto = r.ProtoMajor
+		w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	b := New("T", 1, t.Logf)
+	b.API = srv.URL
+	tr := b.HTTP.Transport.(*http.Transport)
+	if !slices.Equal(tr.TLSClientConfig.NextProtos, []string{"http/1.1"}) {
+		t.Fatalf("ALPN %q", tr.TLSClientConfig.NextProtos)
+	}
+	tr.TLSClientConfig.RootCAs = srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	if err := b.call(context.Background(), "getMe", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if proto != 1 {
+		t.Fatalf("bot used HTTP/%d", proto)
 	}
 }

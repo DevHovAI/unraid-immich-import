@@ -128,9 +128,9 @@ func (a *App) watch(ctx context.Context) {
 	done := map[string]bool{}
 	t := time.NewTicker(a.Cfg.PollInterval)
 	defer t.Stop()
-	last := ""
+	last, lastBroken := "", ""
 	for {
-		cards, seen := importer.FindCards(a.Cfg.DisksDir)
+		cards, seen, broken := importer.FindCards(a.Cfg.DisksDir)
 		// Log what is mounted whenever it changes: explains a card that is
 		// visible on the host but not imported
 		if s := strings.Join(seen, ", "); s != last {
@@ -139,6 +139,13 @@ func (a *App) watch(ctx context.Context) {
 				s = "empty"
 			}
 			a.Log.Printf("%s: %s", a.Cfg.DisksDir, s)
+		}
+		if b := strings.Join(broken, ", "); b != lastBroken {
+			lastBroken = b
+			if b != "" {
+				a.notify("⚠️ Cannot read " + b + " under " + a.Cfg.DisksDir +
+					". If the camera was unplugged without unmounting: Main → Unassigned Devices → Unmount, then plug it in again.")
+			}
 		}
 		present := map[string]bool{}
 		for _, c := range cards {

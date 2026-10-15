@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.0.0-beta.3] – 2026-10-16
+
+### Fixed
+- Telegram did not work at all in beta.2: the bot still offered HTTP/2 and could not read the answer
+- A card under `/mnt/disks` that cannot be read (e.g. a stale mount after the camera was unplugged) is reported in Telegram instead of being skipped silently
+
 ## [2.0.0-beta.2] – 2026-10-16
 
 ### Changed
