@@ -50,10 +50,26 @@ The import works without Telegram too. The album is then called "Import YYYY-MM-
 | `/log` | Last lines of the log |
 | `/stack` | Stack RAW+HIF/JPG pairs across the whole library |
 | `/stack YYYY-MM-DD` | Only what was uploaded since that day |
+| `/backup on` / `/backup off` | Also copy the card into the backup folder (see below). `/backup` alone shows the state. |
 | `/forget` | Clear the memory, e.g. to fetch photos deleted in Immich from the card again. Anything Immich still has is not uploaded twice. |
 | `/help` | All commands |
 
 The bot only reacts to messages from the configured chat. The German commands of v1 (`/abbrechen`, `/letzter`, `/stapeln`, `/kein`, `/vergessen`, `/hilfe`) still work.
+
+## Backup
+
+Besides Immich, camera-import can keep a plain copy of the card, e.g. on a share of the array.
+
+1. Create a share, e.g. `camera-backup`, and enter `/mnt/user/camera-backup/` as **Backup folder** in the container template.
+2. Send `/backup on` in the bot.
+
+From then on, every inserted card is first copied there, then imported. The files land in one folder per day, e.g. `2026/2026-10-16/DSC01234.ARW`, with their original time. A file with the same name but different content (the camera's counter started over) gets a suffix: `DSC01234_1.ARW`.
+
+- Every copy is read back and compared with the card by checksum.
+- Like the import, the backup remembers what is done (`backed-up.txt`): a file is copied once, a failed one again the next time.
+- Turning the backup on later also copies the files that were imported before, as long as they are still on the card.
+- The summary says "the card is fully backed up" when nothing is missing. Then the card can be formatted in the camera.
+- Without a backup folder in the template, `/backup on` refuses: the copy would otherwise end up inside the docker image.
 
 ## Stacking
 

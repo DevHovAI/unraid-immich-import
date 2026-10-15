@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DevHovAI/unraid-immich-import/internal/config"
@@ -20,8 +21,10 @@ import (
 
 // Files in the config directory
 const (
-	MemoryFile = "imported.txt"
-	LastFile   = "last.txt"
+	MemoryFile       = "imported.txt"
+	LastFile         = "last.txt"
+	BackupMemoryFile = "backed-up.txt"
+	BackupStateFile  = "backup.txt" // "on" or "off", set with /backup
 )
 
 // renamed maps the German file names of 2.0.0-beta.1 to the current ones.
@@ -57,6 +60,9 @@ type App struct {
 	Bot     *telegram.Bot
 	Log     *Logger
 	Imp     *importer.Importer
+	Backup  *importer.Backup // nil if its memory could not be opened
+
+	backupOn atomic.Bool
 
 	// StackRetryDelay: how long to wait until Immich has read the metadata
 	StackRetryDelay time.Duration
@@ -83,9 +89,33 @@ func New(cfg config.Config, version string, log *Logger, mem *memory.Store) *App
 	a.Imp = &importer.Importer{
 		Opt:    importer.Options{DryRun: cfg.DryRun, Parallel: cfg.Parallel, ProgressSteps: cfg.ProgressSteps},
 		Immich: a.Immich, Mem: mem, Notify: a.notify, Logf: log.Printf,
-		ChooseAlbum: a.chooseAlbum,
+		ChooseAlbum: a.chooseAlbum, BackupOn: a.backupOn.Load,
+	}
+	if bm, err := memory.Open(filepath.Join(cfg.ConfigDir, BackupMemoryFile)); err != nil {
+		log.Printf("open backup memory: %v – backup is not available", err)
+		a.Imp.BackupOn = nil
+	} else {
+		a.Backup = &importer.Backup{Dir: cfg.BackupDir, Mem: bm}
+		a.Imp.Backup = a.Backup
+		b, _ := os.ReadFile(a.backupStatePath())
+		a.backupOn.Store(strings.TrimSpace(string(b)) == "on")
 	}
 	return a
+}
+
+func (a *App) backupStatePath() string { return filepath.Join(a.Cfg.ConfigDir, BackupStateFile) }
+
+// setBackup turns the backup on or off and remembers it across restarts.
+func (a *App) setBackup(on bool) error {
+	state := "off"
+	if on {
+		state = "on"
+	}
+	if err := os.WriteFile(a.backupStatePath(), []byte(state+"\n"), 0o644); err != nil {
+		return err
+	}
+	a.backupOn.Store(on)
+	return nil
 }
 
 func (a *App) notify(msg string) {
@@ -110,6 +140,12 @@ func (a *App) Run(ctx context.Context) {
 			a.Version, a.Cfg.ImmichURL, err)
 	} else {
 		start += fmt.Sprintf(" (Immich %s, %d files in memory)", ver, a.Mem.Len())
+	}
+	if a.backupOn.Load() {
+		start += "\n💾 Backup is on: " + a.Cfg.BackupDir
+		if err := a.Backup.Ready(); err != nil {
+			start += "\n⚠️ " + err.Error()
+		}
 	}
 	a.notify(start)
 
@@ -180,8 +216,12 @@ func (a *App) importCard(ctx context.Context, c importer.Card) {
 		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
 			msg += "\nThe container is not allowed to read the card – see README (Unassigned Devices)."
 		}
-	case res.Total == 0:
-		msg = fmt.Sprintf("📷 %s: nothing new (%d files already imported). The card can be removed.", c.Label, res.Known)
+	case res.Total == 0 && res.Backup.Total == 0:
+		msg = fmt.Sprintf("📷 %s: nothing new (%d files already imported", c.Label, res.Known)
+		if res.Backup.On {
+			msg += " and backed up"
+		}
+		msg += "). The card can be removed."
 	default:
 		msg = summary(res, a.mode())
 	}
@@ -210,6 +250,23 @@ func summary(r importer.Result, mode string) string {
 	}
 	if r.Known > 0 {
 		fmt.Fprintf(&b, "\n%d files imported earlier, skipped", r.Known)
+	}
+	if bk := r.Backup; bk.Total > 0 {
+		verb := "copied"
+		if mode != "" {
+			verb = "would be copied"
+		}
+		switch {
+		case bk.Failed == 0 && bk.Copied == bk.Total:
+			fmt.Fprintf(&b, "\n💾 Backup: %d %s – the card is fully backed up", bk.Copied, verb)
+		case bk.Failed == 0:
+			fmt.Fprintf(&b, "\n💾 Backup: %d of %d %s", bk.Copied, bk.Total, verb)
+		default:
+			fmt.Fprintf(&b, "\n⚠️ Backup: %d %s, %d errors – retried the next time the card is inserted", bk.Copied, verb, bk.Failed)
+		}
+		for _, e := range bk.Errors {
+			fmt.Fprintf(&b, "\n• Backup: %s", e)
+		}
 	}
 	if r.Trashed > 0 {
 		fmt.Fprintf(&b, "\n%d of them are in Immich's trash", r.Trashed)

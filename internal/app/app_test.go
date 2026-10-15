@@ -128,3 +128,40 @@ func TestEndToEnd(t *testing.T) {
 	a.handle("/hilfe") // German alias from v1
 	bot.waitFor(t, "Commands:")
 }
+
+func TestBackupCommand(t *testing.T) {
+	dir := t.TempDir()
+	backup := filepath.Join(dir, "backup")
+	cfg, err := config.Load(func(k string) string {
+		return map[string]string{"IMMICH_URL": "http://x:2283", "IMMICH_API_KEY": "KEY",
+			"CONFIG_DIR": dir, "BACKUP_DIR": backup}[k]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem, _ := memory.Open(filepath.Join(dir, MemoryFile))
+	log := NewLogger(filepath.Join(dir, "log"), io.Discard)
+	a := New(cfg, "test", log, mem)
+
+	if s := a.backupCommand("on"); !strings.Contains(s, "stays off") || a.backupOn.Load() {
+		t.Fatalf("without folder: %s", s)
+	}
+	os.Mkdir(backup, 0o755)
+	if s := a.backupCommand("true"); !strings.Contains(s, "Backup on") {
+		t.Fatalf("%s", s)
+	}
+	if s := a.backupCommand(""); !strings.Contains(s, "Backup is on") {
+		t.Fatalf("%s", s)
+	}
+	// survives a restart
+	if !New(cfg, "test", log, mem).backupOn.Load() {
+		t.Fatal("state lost after restart")
+	}
+	a.backupCommand("off")
+	if New(cfg, "test", log, mem).backupOn.Load() {
+		t.Fatal("still on")
+	}
+	if s := a.backupCommand("maybe"); !strings.Contains(s, "/backup on") {
+		t.Fatalf("%s", s)
+	}
+}

@@ -18,6 +18,7 @@ var commands = []telegram.Command{
 	{Name: "stack", Description: "stack RAW+HIF/JPG pairs (optional: YYYY-MM-DD)"},
 	{Name: "none", Description: "when asked for an album: no album"},
 	{Name: "forget", Description: "clear the memory: the card is checked in full again"},
+	{Name: "backup", Description: "backup of the card: on, off, or show the state"},
 	{Name: "help", Description: "all commands"},
 }
 
@@ -40,7 +41,8 @@ const help = `Commands:
 /stack – stack RAW+HIF/JPG pairs across the whole library
 /stack YYYY-MM-DD – only what was uploaded since that day
 /none – when asked for an album: no album
-/forget – forget what was already imported (e.g. to fetch photos deleted in Immich again)`
+/forget – forget what was already imported (e.g. to fetch photos deleted in Immich again)
+/backup on|off – also copy the card into the backup folder (/backup alone shows the state)`
 
 // handle processes a message from our own chat.
 func (a *App) handle(text string) {
@@ -109,6 +111,8 @@ func (a *App) handle(text string) {
 			return
 		}
 		a.Bot.Send(fmt.Sprintf("🧹 Forgot %d entries. The next time a card is inserted it is checked in full; anything Immich already has is not uploaded again.", n))
+	case "/backup":
+		a.Bot.Send(a.backupCommand(arg))
 	case "/start", "/help":
 		a.Bot.Send(help)
 	default:
@@ -133,6 +137,10 @@ func (a *App) statusText() string {
 		if p.Album != "" {
 			s += "\nAlbum: " + p.Album
 		}
+		if p.BackupTotal > 0 {
+			s += fmt.Sprintf("\n💾 Backup: %d of %d files copied, %d errors",
+				p.BackupDone.Load(), p.BackupTotal, p.BackupFailed.Load())
+		}
 		parts = append(parts, s)
 	}
 	a.mu.Lock()
@@ -142,7 +150,11 @@ func (a *App) statusText() string {
 	}
 	a.mu.Unlock()
 	if len(parts) == 0 {
-		return fmt.Sprintf("💤 Neither import nor stacking running.\n%d files in memory.", a.Mem.Len())
+		s := fmt.Sprintf("💤 Neither import nor stacking running.\n%d files in memory.", a.Mem.Len())
+		if a.backupOn.Load() {
+			s += fmt.Sprintf("\n💾 Backup on, %d files backed up.", a.Backup.Mem.Len())
+		}
+		return s
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -155,4 +167,43 @@ func (a *App) cancelStack() bool {
 	}
 	a.stackInfo.cancel()
 	return true
+}
+
+func (a *App) backupCommand(arg string) string {
+	if a.Backup == nil {
+		return "❌ Backup is not available, see /log."
+	}
+	switch strings.ToLower(arg) {
+	case "":
+		state := "off"
+		if a.backupOn.Load() {
+			state = "on"
+		}
+		s := fmt.Sprintf("💾 Backup is %s. Folder: %s, %d files backed up.\n/backup on or /backup off",
+			state, a.Cfg.BackupDir, a.Backup.Mem.Len())
+		if err := a.Backup.Ready(); err != nil {
+			s += "\n⚠️ " + err.Error()
+		}
+		return s
+	case "on", "true", "1", "an", "ein", "ja":
+		if err := a.Backup.Ready(); err != nil {
+			return "❌ Backup stays off: " + err.Error()
+		}
+		if err := a.setBackup(true); err != nil {
+			return "❌ " + err.Error()
+		}
+		s := "💾 Backup on. From the next card on, everything that is not in " + a.Cfg.BackupDir +
+			" yet is copied there first, also files that were imported earlier."
+		if a.Imp.Current() != nil {
+			s += " The running import is not affected."
+		}
+		return s
+	case "off", "false", "0", "aus", "nein":
+		if err := a.setBackup(false); err != nil {
+			return "❌ " + err.Error()
+		}
+		return "💾 Backup off."
+	default:
+		return "Use /backup on, /backup off, or /backup alone for the state."
+	}
 }

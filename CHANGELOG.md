@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.0.0-beta.4] – 2026-10-16
+
+### Added
+- Backup: `/backup on` copies every inserted card into a backup folder (new template field), one folder per day, checked by checksum, before the import. `/backup off` turns it off, `/backup` shows the state.
+
 ## [2.0.0-beta.3] – 2026-10-16
 
 ### Fixed

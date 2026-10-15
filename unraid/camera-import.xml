@@ -12,6 +12,7 @@
   <Icon>https://raw.githubusercontent.com/DevHovAI/unraid-immich-import/main/unraid/icon.png</Icon>
   <Config Name="Cards (Unassigned Devices)" Target="/mnt/disks" Default="/mnt/disks/" Mode="ro,slave" Description="Where Unassigned Devices mounts the card. Read-only – do not change." Type="Path" Display="always" Required="true" Mask="false">/mnt/disks/</Config>
   <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/camera-import" Mode="rw" Description="Memory (what was already imported), log, last import" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/camera-import</Config>
+  <Config Name="Backup folder" Target="/backup" Default="" Mode="rw" Description="Optional: where /backup on copies the card, e.g. /mnt/user/camera-backup/ (one folder per day). Empty = no backup." Type="Path" Display="always" Required="false" Mask="false"/>
   <Config Name="Immich URL" Target="IMMICH_URL" Default="" Mode="" Description="e.g. http://&lt;server-ip&gt;:2283" Type="Variable" Display="always" Required="true" Mask="false"/>
   <Config Name="Immich API key" Target="IMMICH_API_KEY" Default="" Mode="" Description="Immich → Account Settings → API Keys (permissions: see README, or “All”)" Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="Telegram bot token" Target="TG_BOT_TOKEN" Default="" Mode="" Description="From @BotFather. Empty = no messages." Type="Variable" Display="always" Required="false" Mask="true"/>

@@ -32,6 +32,7 @@ type Config struct {
 
 	DisksDir     string // where Unassigned Devices mounts the cards
 	ConfigDir    string // memory, log, last import
+	BackupDir    string // target of /backup on
 	PollInterval time.Duration
 	Parallel     int // concurrent uploads
 }
@@ -79,6 +80,7 @@ func Load(getenv func(string) string) (Config, error) {
 		StackTolerance:  time.Duration(num("STACK_TOLERANCE", 2, 0)) * time.Second,
 		DisksDir:        get("DISKS_DIR", "/mnt/disks"),
 		ConfigDir:       get("CONFIG_DIR", "/config"),
+		BackupDir:       get("BACKUP_DIR", "/backup"),
 		PollInterval:    time.Duration(num("POLL_INTERVAL", 5, 1)) * time.Second,
 		Parallel:        num("UPLOAD_PARALLEL", 2, 1),
 	}

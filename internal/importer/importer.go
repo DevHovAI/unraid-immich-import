@@ -21,6 +21,7 @@ import (
 // Phases shown by /status
 const (
 	PhaseAlbum     = "waiting for the album name"
+	PhaseBackup    = "backing up"
 	PhaseChecking  = "checking for duplicates"
 	PhaseUploading = "uploading"
 	PhaseAddAlbum  = "adding to album"
@@ -42,6 +43,9 @@ type Importer struct {
 	Logf   func(string, ...any)
 	// ChooseAlbum asks for the album name ("" = none) for n new files.
 	ChooseAlbum func(ctx context.Context, card string, n int) string
+	// Backup copies the card before the import if BackupOn says so.
+	Backup   *Backup
+	BackupOn func() bool
 
 	mu     sync.Mutex
 	cur    *Progress
@@ -63,17 +67,24 @@ type Progress struct {
 	Failed   atomic.Int64
 	BytesUp  atomic.Int64
 	Rejected atomic.Int64 // format not supported by Immich
+
+	BackupTotal  int   // files to back up
+	BackupBytes  int64 // their size
+	BackupDone   atomic.Int64
+	BackupFailed atomic.Int64
+	BackupBytesC atomic.Int64 // bytes copied
 }
 
 func (p *Progress) Phase() string     { s, _ := p.phase.Load().(string); return s }
 func (p *Progress) setPhase(s string) { p.phase.Store(s) }
 
-// Percent by bytes, so large videos count correctly
+// Percent by bytes over backup and upload, so large videos count correctly
 func (p *Progress) Percent() int {
-	if p.Bytes == 0 {
+	total := p.Bytes + p.BackupBytes
+	if total == 0 {
 		return 100
 	}
-	return int(100 * p.BytesUp.Load() / p.Bytes)
+	return int(100 * (p.BytesUp.Load() + p.BackupBytesC.Load()) / total)
 }
 
 type Result struct {
@@ -91,6 +102,17 @@ type Result struct {
 	Canceled   bool
 	Errors     []string
 	CreatedIDs []string
+
+	Backup BackupResult
+}
+
+type BackupResult struct {
+	On     bool
+	Total  int // files that were not backed up yet
+	Known  int // backed up earlier
+	Copied int
+	Failed int
+	Errors []string
 }
 
 // Current returns the running import or nil.
@@ -122,33 +144,47 @@ type job struct {
 	sum string
 }
 
-// Import uploads all new files on the card. Known files (memory) are not
-// touched, only recognised via stat.
+// Import backs up (if turned on) and uploads all new files on the card.
+// Known files (memory) are not touched, only recognised via stat.
 func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	res := Result{Card: card.Label, Start: time.Now()}
 	files, err := Scan(card)
 	if err != nil {
 		return res, fmt.Errorf("read card: %w", err)
 	}
-	var fresh []File
-	var bytes int64
+	var fresh, toBackup []File
+	var bytes, backupBytes int64
 	for _, f := range files {
 		if im.Mem.Has(f.Key()) {
 			res.Known++
-			continue
+		} else {
+			fresh = append(fresh, f)
+			bytes += f.Size
 		}
-		fresh = append(fresh, f)
-		bytes += f.Size
+	}
+	if im.BackupOn != nil && im.BackupOn() {
+		res.Backup.On = true
+		for _, f := range files {
+			if im.Backup.Mem.Has(f.Key()) {
+				res.Backup.Known++
+			} else {
+				toBackup = append(toBackup, f)
+				backupBytes += f.Size
+			}
+		}
+		res.Backup.Total = len(toBackup)
 	}
 	res.Total = len(fresh)
-	im.logf("%s: %d files, %d of them new (%s)", card.Label, len(files), len(fresh), fmtBytes(bytes))
-	if len(fresh) == 0 {
+	im.logf("%s: %d files, %d of them new (%s), %d to back up (%s)", card.Label, len(files),
+		len(fresh), fmtBytes(bytes), len(toBackup), fmtBytes(backupBytes))
+	if len(fresh) == 0 && len(toBackup) == 0 {
 		return res, nil
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	p := &Progress{Card: card.Label, Start: res.Start, Total: len(fresh), Known: res.Known, Bytes: bytes}
+	p := &Progress{Card: card.Label, Start: res.Start, Total: len(fresh), Known: res.Known, Bytes: bytes,
+		BackupTotal: len(toBackup), BackupBytes: backupBytes}
 	p.setPhase(PhaseAlbum)
 	im.mu.Lock()
 	im.cur, im.cancel = p, cancel
@@ -159,7 +195,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 		im.mu.Unlock()
 	}()
 
-	if im.ChooseAlbum != nil {
+	if im.ChooseAlbum != nil && len(fresh) > 0 {
 		res.Album = im.ChooseAlbum(ctx, card.Label, len(fresh))
 		p.Album = res.Album
 	}
@@ -168,8 +204,14 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 		mode = " (dry run)"
 	}
 	msg := fmt.Sprintf("📷 Import started%s: %d new files from %s (%s)", mode, len(fresh), card.Label, fmtBytes(bytes))
+	if len(fresh) == 0 {
+		msg = fmt.Sprintf("📷 Nothing new to import from %s%s", card.Label, mode)
+	}
 	if res.Known > 0 {
 		msg += fmt.Sprintf(", %d imported earlier", res.Known)
+	}
+	if len(toBackup) > 0 {
+		msg += fmt.Sprintf("\n💾 Backup first: %d files (%s)", len(toBackup), fmtBytes(backupBytes))
 	}
 	if res.Album != "" {
 		msg += fmt.Sprintf("\nAlbum: %s", res.Album)
@@ -178,6 +220,83 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 
 	stopWatch := im.watchProgress(p)
 	defer stopWatch()
+
+	sums := im.backup(ctx, p, toBackup, &res.Backup)
+	if len(fresh) > 0 && ctx.Err() == nil {
+		im.upload(ctx, p, fresh, sums, &res)
+	}
+	res.Canceled = ctx.Err() != nil && errors.Is(ctx.Err(), context.Canceled)
+	res.Duration = time.Since(res.Start)
+
+	// Only the really new files go into the album
+	if res.Album != "" && len(res.CreatedIDs) > 0 {
+		p.setPhase(PhaseAddAlbum)
+		if _, err := im.Immich.AddToAlbum(context.WithoutCancel(ctx), res.Album, res.CreatedIDs); err != nil {
+			res.Errors = append(res.Errors, "Album: "+err.Error())
+			im.logf("Album %q: %v", res.Album, err)
+		}
+	}
+	return res, nil
+}
+
+// backup copies files one by one (the card is the bottleneck) and returns
+// their checksums, so the upload does not read them a second time.
+func (im *Importer) backup(ctx context.Context, p *Progress, files []File, r *BackupResult) map[string]string {
+	sums := map[string]string{}
+	if len(files) == 0 {
+		return sums
+	}
+	p.setPhase(PhaseBackup)
+	if err := im.Backup.Ready(); err != nil {
+		r.Failed = len(files)
+		r.Errors = append(r.Errors, err.Error())
+		p.BackupFailed.Add(int64(len(files)))
+		p.BackupBytesC.Add(p.BackupBytes)
+		im.logf("backup: %v", err)
+		return sums
+	}
+	for i, f := range files {
+		if ctx.Err() != nil {
+			break
+		}
+		if im.Opt.DryRun {
+			r.Copied++
+			p.BackupDone.Add(1)
+			p.BackupBytesC.Add(f.Size)
+			continue
+		}
+		sum, err := im.Backup.Copy(ctx, f)
+		p.BackupBytesC.Add(f.Size)
+		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+			r.Failed++
+			p.BackupFailed.Add(1)
+			if len(r.Errors) < 5 {
+				r.Errors = append(r.Errors, fmt.Sprintf("%s: %v", f.Name, err))
+			}
+			im.logf("backup of %s: %v", f.Path, err)
+			if diskFull(err) {
+				rest := len(files) - i - 1
+				r.Failed += rest
+				p.BackupFailed.Add(int64(rest))
+				r.Errors = append(r.Errors, fmt.Sprintf("backup folder full, %d files not backed up", rest))
+				break
+			}
+			continue
+		}
+		r.Copied++
+		p.BackupDone.Add(1)
+		if sum != "" {
+			sums[f.Key()] = sum
+		}
+	}
+	return sums
+}
+
+// upload checks and uploads the new files.
+func (im *Importer) upload(ctx context.Context, p *Progress, fresh []File, sums map[string]string, res *Result) {
 
 	var mu sync.Mutex // guards res
 	fail := func(f File, err error) {
@@ -210,7 +329,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				im.upload(ctx, p, j, &res, &mu, fail, remember)
+				im.uploadOne(ctx, p, j, res, &mu, fail, remember)
 			}
 		}()
 	}
@@ -221,7 +340,11 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 		var items []job
 		var check []immich.CheckItem
 		for _, f := range chunk {
-			sum, err := sha1File(ctx, f.Path)
+			sum, ok := sums[f.Key()]
+			var err error
+			if !ok {
+				sum, err = sha1File(ctx, f.Path)
+			}
 			if err != nil {
 				if ctx.Err() != nil {
 					break
@@ -290,22 +413,9 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	}
 	close(jobs)
 	wg.Wait()
-
-	res.Canceled = ctx.Err() != nil && errors.Is(ctx.Err(), context.Canceled)
-	res.Duration = time.Since(res.Start)
-
-	// 2. Only the really new files go into the album
-	if res.Album != "" && len(res.CreatedIDs) > 0 {
-		p.setPhase(PhaseAddAlbum)
-		if _, err := im.Immich.AddToAlbum(context.WithoutCancel(ctx), res.Album, res.CreatedIDs); err != nil {
-			res.Errors = append(res.Errors, "Album: "+err.Error())
-			im.logf("Album %q: %v", res.Album, err)
-		}
-	}
-	return res, nil
 }
 
-func (im *Importer) upload(ctx context.Context, p *Progress, j job, res *Result, mu *sync.Mutex,
+func (im *Importer) uploadOne(ctx context.Context, p *Progress, j job, res *Result, mu *sync.Mutex,
 	fail func(File, error), remember func(File)) {
 	var sent atomic.Int64
 	r, err := im.Immich.Upload(ctx, j.f.Path, j.sum, func(n int64) {
@@ -353,8 +463,8 @@ func (im *Importer) watchProgress(p *Progress) (stop func()) {
 				hit, steps = steps[0], steps[1:]
 			}
 			if hit > 0 {
-				im.Notify(fmt.Sprintf("⏳ %d %% done (%s): %d of %d files, running for %s",
-					hit, p.Card, p.Done.Load(), p.Total, FmtDur(time.Since(p.Start))))
+				im.Notify(fmt.Sprintf("⏳ %d %% done (%s, %s), running for %s",
+					hit, p.Card, p.Phase(), FmtDur(time.Since(p.Start))))
 			}
 		}
 	}()
