@@ -14,6 +14,7 @@ import (
 
 	"github.com/DevHovAI/unraid-immich-import/internal/config"
 	"github.com/DevHovAI/unraid-immich-import/internal/fakeimmich"
+	"github.com/DevHovAI/unraid-immich-import/internal/importer"
 	"github.com/DevHovAI/unraid-immich-import/internal/memory"
 )
 
@@ -83,6 +84,7 @@ func TestEndToEnd(t *testing.T) {
 	mem, _ := memory.Open(filepath.Join(dir, MemoryFile))
 	a := New(cfg, "test", NewLogger(filepath.Join(dir, "log"), io.Discard), mem)
 	a.Bot.API = bot.URL
+	a.UnmountWait = 400 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -101,6 +103,9 @@ func TestEndToEnd(t *testing.T) {
 	}
 	a.handle("Autumn")
 	sum := bot.waitFor(t, "✅ Import done")
+	if !strings.Contains(sum, "helper script camera-import-helper is not running") {
+		t.Fatalf("without helper: %s", sum)
+	}
 	if !strings.Contains(sum, "2 new") || !strings.Contains(sum, "Album: Autumn (2 newly added)") {
 		t.Fatalf("summary: %s", sum)
 	}
@@ -163,5 +168,58 @@ func TestBackupCommand(t *testing.T) {
 	}
 	if s := a.backupCommand("maybe"); !strings.Contains(s, "/backup on") {
 		t.Fatalf("%s", s)
+	}
+}
+
+func TestUnmount(t *testing.T) {
+	dir := t.TempDir()
+	cfg, _ := config.Load(func(k string) string {
+		return map[string]string{"IMMICH_URL": "http://x:2283", "IMMICH_API_KEY": "KEY", "CONFIG_DIR": dir}[k]
+	})
+	mem, _ := memory.Open(filepath.Join(dir, MemoryFile))
+	a := New(cfg, "test", NewLogger(filepath.Join(dir, "log"), io.Discard), mem)
+	a.UnmountWait = 2 * time.Second
+	root := filepath.Join(dir, "disks", "SONY")
+	os.MkdirAll(filepath.Join(root, "DCIM"), 0o755)
+	c := importer.Card{Label: "SONY", Root: root}
+
+	// helper: takes the request and unmounts
+	req := filepath.Join(dir, UnmountDir, "SONY")
+	go func() {
+		for range 100 {
+			if _, err := os.Stat(req); err == nil {
+				os.Remove(req)
+				os.RemoveAll(root)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	if s := a.unmount(c); !strings.Contains(s, "Card unmounted") {
+		t.Fatal(s)
+	}
+
+	// helper takes the request, but the card stays
+	os.MkdirAll(filepath.Join(root, "DCIM"), 0o755)
+	a.UnmountWait = 300 * time.Millisecond
+	go func() {
+		for range 100 {
+			if os.Remove(req) == nil {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	if s := a.unmount(c); !strings.Contains(s, "Unmounting failed") {
+		t.Fatal(s)
+	}
+
+	// turned off
+	a.Cfg.AutoUnmount = false
+	if s := a.unmount(c); !strings.HasPrefix(s, "Unmount it in") {
+		t.Fatal(s)
+	}
+	if _, err := os.Stat(req); err == nil {
+		t.Fatal("no request when turned off")
 	}
 }

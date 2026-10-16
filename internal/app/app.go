@@ -66,6 +66,8 @@ type App struct {
 
 	// StackRetryDelay: how long to wait until Immich has read the metadata
 	StackRetryDelay time.Duration
+	// UnmountWait: how long to wait for the helper script to unmount a card
+	UnmountWait time.Duration
 
 	ctx       context.Context // lives as long as Run
 	mu        sync.Mutex
@@ -84,7 +86,7 @@ type stackState struct {
 func New(cfg config.Config, version string, log *Logger, mem *memory.Store) *App {
 	a := &App{Cfg: cfg, Version: version, Log: log, Mem: mem,
 		Immich:          immich.New(cfg.ImmichURL, cfg.APIKey),
-		StackRetryDelay: 30 * time.Minute}
+		StackRetryDelay: 30 * time.Minute, UnmountWait: 40 * time.Second}
 	a.Bot = telegram.New(cfg.TGToken, cfg.TGChat, log.Printf)
 	a.Imp = &importer.Importer{
 		Opt:    importer.Options{DryRun: cfg.DryRun, Parallel: cfg.Parallel, ProgressSteps: cfg.ProgressSteps},
@@ -133,6 +135,7 @@ func (a *App) mode() string {
 // Run runs until ctx ends: bot and card watcher.
 func (a *App) Run(ctx context.Context) {
 	a.ctx = ctx
+	a.clearUnmountRequests()
 	ver, err := a.Immich.About(ctx)
 	start := fmt.Sprintf("✅ camera-import v%s started%s", a.Version, a.mode())
 	if err != nil {
@@ -221,9 +224,12 @@ func (a *App) importCard(ctx context.Context, c importer.Card) {
 		if res.Backup.On {
 			msg += " and backed up"
 		}
-		msg += "). The card can be removed."
+		msg += ")."
 	default:
 		msg = summary(res, a.mode())
+	}
+	if ctx.Err() == nil {
+		msg += "\n" + a.unmount(c)
 	}
 	a.notify(msg)
 	a.saveLast(msg)
@@ -280,10 +286,55 @@ func summary(r importer.Result, mode string) string {
 	for _, e := range r.Errors {
 		fmt.Fprintf(&b, "\n• %s", e)
 	}
-	if !r.Canceled {
-		b.WriteString("\nThe card can be removed.")
-	}
 	return b.String()
+}
+
+// UnmountDir is where the container asks the helper script (User Script
+// camera-import-helper) to unmount a card: one file per card name.
+const UnmountDir = "unmount"
+
+// unmount asks the helper script to unmount the card and waits until it is
+// gone. Unassigned Devices never unmounts on its own: a card unplugged while
+// mounted stays a dead mount and is not mounted again next time.
+func (a *App) unmount(c importer.Card) string {
+	const manual = "Unmount it in Main → Unassigned Devices before unplugging."
+	if !a.Cfg.AutoUnmount {
+		return manual
+	}
+	dir := filepath.Join(a.Cfg.ConfigDir, UnmountDir)
+	req := filepath.Join(dir, c.Label)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		a.Log.Printf("unmount request: %v", err)
+		return "⚠️ Could not ask for unmounting. " + manual
+	}
+	if err := os.WriteFile(req, nil, 0o644); err != nil {
+		a.Log.Printf("unmount request: %v", err)
+		return "⚠️ Could not ask for unmounting. " + manual
+	}
+	deadline := time.Now().Add(a.UnmountWait)
+	for time.Now().Before(deadline) {
+		time.Sleep(a.UnmountWait / 80)
+		if _, err := os.Stat(filepath.Join(c.Root, "DCIM")); err != nil {
+			a.Log.Printf("%s unmounted", c.Label)
+			return "⏏️ Card unmounted – you can unplug it."
+		}
+	}
+	if _, err := os.Stat(req); err == nil {
+		os.Remove(req)
+		a.Log.Printf("unmount %s: helper script did not pick up the request", c.Label)
+		return "⚠️ Not unmounted: the helper script camera-import-helper is not running (see README). " + manual
+	}
+	a.Log.Printf("unmount %s: still mounted after %s", c.Label, a.UnmountWait)
+	return "⚠️ Unmounting failed (details in the system log). " + manual
+}
+
+// clearUnmountRequests drops requests from before a restart.
+func (a *App) clearUnmountRequests() {
+	dir := filepath.Join(a.Cfg.ConfigDir, UnmountDir)
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		os.Remove(filepath.Join(dir, e.Name()))
+	}
 }
 
 func (a *App) lastPath() string { return filepath.Join(a.Cfg.ConfigDir, LastFile) }

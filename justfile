@@ -11,7 +11,7 @@ default:
     @just --list --unsorted
 
 # Everything CI checks too. Before every push.
-check: fmt vet test legacy
+check: fmt vet test helper legacy
     @echo
     @echo "all green"
 
@@ -33,6 +33,11 @@ image version="dev":
 # Fake Immich on port 2283 for smoke tests (API key KEY)
 fake:
     podman run --rm -p 2283:2283 -v {{justfile_directory()}}:/src:z -w /src -e GOFLAGS=-buildvcs=false docker.io/library/golang:1.24 go run ./internal/fakeimmich/cmd/fakeimmich :2283
+
+# Helper script for the server (User Script)
+helper:
+    bash -n unraid/camera-import-helper.sh
+    shellcheck unraid/camera-import-helper.sh
 
 # Script version (v1): installer up to date, syntax, shellcheck
 legacy:

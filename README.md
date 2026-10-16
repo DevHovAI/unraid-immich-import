@@ -20,7 +20,9 @@ You need the **Unassigned Devices** plugin (Apps → "Unassigned Devices"). It m
    Then Docker → **Add Container** → under **Template**, pick `camera-import` from "User templates".
 2. **Fill in the settings:** Immich URL, API key, Telegram token and chat ID (see below). For the first test set **Dry run = 1**. **Apply**.
 3. **Insert the card once**, then in Main → Unassigned Devices click the gear icon next to the device. Turn on **Automount** and **Read Only**. Do this once for the card reader and once for the camera; Unassigned Devices remembers it per device.
-4. Pull the card and insert it again. Telegram asks for the album, then the import runs. If everything works, set Dry run back to 0.
+4. **Helper for unmounting:** Settings → User Scripts → **Add New Script**, name `camera-import-helper`. Click the gear → **Edit Script**, paste the content of [`unraid/camera-import-helper.sh`](unraid/camera-import-helper.sh), **Save Changes**. Set the schedule to **At Startup of Array**, **Apply**, then click **Run in Background** once.
+   The container cannot unmount the card itself (it only has read access). After every import, and after `/cancel`, it asks this helper, and the bot reports "⏏️ Card unmounted – you can unplug it". The helper also cleans up a card that was unplugged while still mounted: Unassigned Devices leaves such a mount behind and would not mount the card again.
+5. Pull the card and insert it again. Telegram asks for the album, then the import runs. If everything works, set Dry run back to 0.
 
 **Change a setting**, e.g. a new API key: Docker → `camera-import` → **Edit** → change → **Apply**.
 
@@ -93,7 +95,8 @@ In the camera menu, set the USB connection to **Mass Storage (MSC)**. In MTP mod
 
 - Log: Docker → `camera-import` → **Logs**, or `/log` in the bot. The file is `appdata/camera-import/camera-import.log`.
 - Nothing happens when you insert the card: does Unassigned Devices mount it? Under Main → Unassigned Devices it must show as "mounted", and there must be files under `/mnt/disks/<name>/DCIM`. Otherwise **Automount** is not turned on. The log shows what the container sees, e.g. `/mnt/disks: Sony_DSC (permission denied)` or `/mnt/disks: empty`. If the card is mounted on the host but missing in that line, check that the container path `/mnt/disks` uses access mode **Read Only - Slave**.
-- "Cannot read Sony_DSC … (input/output error)": the camera was unplugged while it was still mounted, and Unassigned Devices reused the old, dead mount. In Main → Unassigned Devices click **Unmount** for the card, then plug it in again.
+- "Cannot read Sony_DSC … (input/output error)": the camera was unplugged while it was still mounted, and Unassigned Devices kept the old, dead mount. The helper script removes it within seconds. Without the helper: in Main → Unassigned Devices click **Unmount** for the card, then plug it in again.
+- "Not unmounted: the helper script … is not running": in User Scripts, click **Run in Background** for `camera-import-helper`. Its messages are in the system log (`camera-import-helper`).
 - "not allowed to read the card": in Unassigned Devices, turn **Read Only** off and on again for the card so it is mounted again. If that doesn't help, set **PUID = 0** in the container template (Advanced View).
 - The memory is `appdata/camera-import/imported.txt`, one line per file. Files from 2.0.0-beta.1 (`importiert.txt`, `letzter.txt`) are renamed on the first start.
 

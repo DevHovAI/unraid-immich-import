@@ -34,5 +34,7 @@ jobs:
         run: |
           for f in legacy/user.scripts/*/script legacy/boot/camera-import/*.sh legacy/camera-import-install.sh; do bash -n "$f"; done
           shellcheck -x -P SCRIPTDIR legacy/user.scripts/*/script legacy/boot/camera-import/*.sh legacy/camera-import-install.sh
+          bash -n unraid/camera-import-helper.sh
+          shellcheck unraid/camera-import-helper.sh
       - name: PHP syntax
         run: for f in legacy/boot/camera-import/*.php; do php -l "$f"; done

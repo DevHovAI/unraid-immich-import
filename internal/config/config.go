@@ -27,6 +27,7 @@ type Config struct {
 	ProgressSteps []int // percentages for progress messages
 
 	StackPairs     bool
+	AutoUnmount    bool   // ask the helper script to unmount the card afterwards
 	StackCover     string // display or raw
 	StackTolerance time.Duration
 
@@ -76,6 +77,7 @@ func Load(getenv func(string) string) (Config, error) {
 		AlbumAskTimeout: time.Duration(num("ALBUM_ASK_TIMEOUT", 120, 10)) * time.Second,
 		DryRun:          flag("DRY_RUN", "0"),
 		StackPairs:      flag("STACK_PAIRS", "1"),
+		AutoUnmount:     flag("AUTO_UNMOUNT", "1"),
 		StackCover:      get("STACK_COVER", "display"),
 		StackTolerance:  time.Duration(num("STACK_TOLERANCE", 2, 0)) * time.Second,
 		DisksDir:        get("DISKS_DIR", "/mnt/disks"),

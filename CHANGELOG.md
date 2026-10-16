@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.0.0-beta.5] – 2026-10-17
+
+### Added
+- The card is unmounted after every import and after `/cancel`, so it can be unplugged safely. This needs the new User Script `camera-import-helper` (see README); `AUTO_UNMOUNT=0` turns it off.
+- The helper also removes the dead mount of a card that was unplugged while mounted, and lets Unassigned Devices mount it again. Before, such a card was not imported until it was unmounted by hand.
+
+### Changed
+- The bot no longer says "The card can be removed" without unmounting.
+
 ## [2.0.0-beta.4] – 2026-10-16
 
 ### Added
