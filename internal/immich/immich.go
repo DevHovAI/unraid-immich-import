@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -261,6 +262,23 @@ func (c *Client) Search(ctx context.Context, q SearchQuery, fn func([]Asset) err
 
 // AddToAlbum puts the files into the album with this name and creates it if
 // it doesn't exist yet.
+// Albums returns the album names, most recently changed first.
+func (c *Client) Albums(ctx context.Context) ([]string, error) {
+	var albums []struct {
+		AlbumName string    `json:"albumName"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/albums", nil, &albums); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(albums, func(i, j int) bool { return albums[i].UpdatedAt.After(albums[j].UpdatedAt) })
+	names := make([]string, 0, len(albums))
+	for _, a := range albums {
+		names = append(names, a.AlbumName)
+	}
+	return names, nil
+}
+
 func (c *Client) AddToAlbum(ctx context.Context, name string, ids []string) (created bool, err error) {
 	var albums []struct {
 		ID        string `json:"id"`

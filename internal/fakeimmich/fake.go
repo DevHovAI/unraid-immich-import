@@ -30,12 +30,13 @@ type Server struct {
 	Uploads   int
 	Checked   int
 	nextID    int
-	albumName map[string]string // ID → name
+	albumName map[string]string    // ID → name
+	albumTime map[string]time.Time // ID → last change
 }
 
 func New() *Server {
 	s := &Server{Assets: map[string]*Asset{}, Albums: map[string][]string{}, Fail: map[string]bool{},
-		albumName: map[string]string{}}
+		albumName: map[string]string{}, albumTime: map[string]time.Time{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -123,9 +124,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	case r.Method == "GET" && r.URL.Path == "/api/albums":
 		s.mu.Lock()
-		var out []map[string]string
+		var out []map[string]any
 		for id, name := range s.albumName {
-			out = append(out, map[string]string{"id": id, "albumName": name})
+			out = append(out, map[string]any{"id": id, "albumName": name, "updatedAt": s.albumTime[id]})
 		}
 		s.mu.Unlock()
 		js(200, out)
@@ -136,6 +137,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		id := fmt.Sprintf("album-%d", len(s.albumName)+1)
 		s.albumName[id] = in.AlbumName
+		s.albumTime[id] = time.Now()
 		s.Albums[in.AlbumName] = nil
 		s.mu.Unlock()
 		js(201, map[string]string{"id": id})
@@ -146,6 +148,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&in)
 		s.mu.Lock()
 		name := s.albumName[id]
+		s.albumTime[id] = time.Now()
 		s.Albums[name] = append(s.Albums[name], in.IDs...)
 		s.mu.Unlock()
 		js(200, []any{})

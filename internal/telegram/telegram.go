@@ -78,21 +78,70 @@ func (b *Bot) call(ctx context.Context, method string, form url.Values, out any)
 }
 
 // Send sends a message; errors only go to the log.
-func (b *Bot) Send(text string) {
+func (b *Bot) Send(text string) { b.SendButtons(text, nil) }
+
+// Button is an inline button below a message. Data comes back to the
+// button handler of Poll (at most 64 bytes).
+type Button struct{ Text, Data string }
+
+// SendButtons sends a message with rows of buttons and returns its ID
+// (0 on error).
+func (b *Bot) SendButtons(text string, rows [][]Button) int64 {
 	if !b.Enabled() {
-		return
+		return 0
 	}
 	if r := []rune(text); len(r) > 4000 {
 		text = string(r[:4000]) + "…"
 	}
+	form := url.Values{"chat_id": {strconv.FormatInt(b.Chat, 10)}, "text": {text}}
+	if len(rows) > 0 {
+		form.Set("reply_markup", keyboard(rows))
+	}
+	var msg struct {
+		MessageID int64 `json:"message_id"`
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	err := b.call(ctx, "sendMessage", url.Values{
-		"chat_id": {strconv.FormatInt(b.Chat, 10)}, "text": {text},
+	if err := b.call(ctx, "sendMessage", form, &msg); err != nil {
+		if b.Log != nil {
+			b.Log("Telegram message failed: %v", err)
+		}
+		return 0
+	}
+	return msg.MessageID
+}
+
+// Edit replaces the text of a message and removes its buttons.
+func (b *Bot) Edit(id int64, text string) {
+	if !b.Enabled() || id == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	err := b.call(ctx, "editMessageText", url.Values{
+		"chat_id": {strconv.FormatInt(b.Chat, 10)}, "message_id": {strconv.FormatInt(id, 10)},
+		"text": {text},
 	}, nil)
 	if err != nil && b.Log != nil {
-		b.Log("Telegram message failed: %v", err)
+		b.Log("Telegram edit failed: %v", err)
 	}
+}
+
+func keyboard(rows [][]Button) string {
+	type btn struct {
+		Text string `json:"text"`
+		Data string `json:"callback_data"`
+	}
+	var kb [][]btn
+	for _, r := range rows {
+		var row []btn
+		for _, x := range r {
+			row = append(row, btn{x.Text, x.Data})
+		}
+		kb = append(kb, row)
+	}
+	j, _ := json.Marshal(map[string]any{"inline_keyboard": kb})
+	return string(j)
 }
 
 type Command struct{ Name, Description string }
@@ -110,17 +159,26 @@ func (b *Bot) SetCommands(ctx context.Context, cmds []Command) error {
 	return b.call(ctx, "setMyCommands", url.Values{"commands": {string(j)}}, nil)
 }
 
-// Poll calls handle for every text message from our own chat until ctx
-// ends. Messages from before the start are skipped.
-func (b *Bot) Poll(ctx context.Context, handle func(text string)) {
+type message struct {
+	MessageID int64 `json:"message_id"`
+	Chat      struct {
+		ID int64 `json:"id"`
+	} `json:"chat"`
+	Text string `json:"text"`
+}
+
+// Poll calls handle for every text message and onButton for every button
+// press from our own chat until ctx ends. Messages from before the start are
+// skipped.
+func (b *Bot) Poll(ctx context.Context, handle func(text string), onButton func(data string, msgID int64)) {
 	type update struct {
-		UpdateID int64 `json:"update_id"`
-		Message  *struct {
-			Chat struct {
-				ID int64 `json:"id"`
-			} `json:"chat"`
-			Text string `json:"text"`
-		} `json:"message"`
+		UpdateID int64    `json:"update_id"`
+		Message  *message `json:"message"`
+		Callback *struct {
+			ID      string   `json:"id"`
+			Data    string   `json:"data"`
+			Message *message `json:"message"`
+		} `json:"callback_query"`
 	}
 	offset := int64(-1) // -1: fetch only the last old message and drop it
 	skipOld := true
@@ -129,7 +187,7 @@ func (b *Bot) Poll(ctx context.Context, handle func(text string)) {
 		var ups []update
 		err := b.call(ctx, "getUpdates", url.Values{
 			"offset": {strconv.FormatInt(offset, 10)}, "timeout": {strconv.Itoa(pollSeconds)},
-			"allowed_updates": {`["message"]`},
+			"allowed_updates": {`["message","callback_query"]`},
 		}, &ups)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -150,7 +208,18 @@ func (b *Bot) Poll(ctx context.Context, handle func(text string)) {
 		backoff = time.Second
 		for _, u := range ups {
 			offset = u.UpdateID + 1
-			if skipOld || u.Message == nil || u.Message.Chat.ID != b.Chat {
+			if skipOld {
+				continue
+			}
+			if c := u.Callback; c != nil && c.Message != nil && c.Message.Chat.ID == b.Chat {
+				// stop the spinner on the button
+				b.call(ctx, "answerCallbackQuery", url.Values{"callback_query_id": {c.ID}}, nil)
+				if onButton != nil {
+					onButton(c.Data, c.Message.MessageID)
+				}
+				continue
+			}
+			if u.Message == nil || u.Message.Chat.ID != b.Chat {
 				continue
 			}
 			if t := strings.TrimSpace(u.Message.Text); t != "" {

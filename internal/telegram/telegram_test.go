@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -13,7 +14,7 @@ import (
 
 func TestPollAndSend(t *testing.T) {
 	var mu sync.Mutex
-	var sent []string
+	var sent, answered []string
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
@@ -22,7 +23,10 @@ func TestPollAndSend(t *testing.T) {
 		switch r.URL.Path {
 		case "/botT/sendMessage":
 			sent = append(sent, r.Form.Get("text"))
-			w.Write([]byte(`{"ok":true,"result":{}}`))
+			w.Write([]byte(`{"ok":true,"result":{"message_id":42}}`))
+		case "/botT/answerCallbackQuery":
+			answered = append(answered, r.Form.Get("callback_query_id"))
+			w.Write([]byte(`{"ok":true,"result":true}`))
 		case "/botT/getUpdates":
 			calls++
 			var res any = []any{}
@@ -36,6 +40,10 @@ func TestPollAndSend(t *testing.T) {
 				res = []map[string]any{
 					{"update_id": 6, "message": map[string]any{"chat": map[string]any{"id": 99}, "text": "/foreign"}},
 					{"update_id": 7, "message": map[string]any{"chat": map[string]any{"id": 1}, "text": " /status "}},
+					{"update_id": 8, "callback_query": map[string]any{"id": "cb1", "data": "3:2",
+						"message": map[string]any{"message_id": 42, "chat": map[string]any{"id": 1}}}},
+					{"update_id": 9, "callback_query": map[string]any{"id": "cb2", "data": "3:3",
+						"message": map[string]any{"message_id": 43, "chat": map[string]any{"id": 99}}}},
 				}
 			default:
 				time.Sleep(20 * time.Millisecond)
@@ -50,12 +58,16 @@ func TestPollAndSend(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	var got []string
-	b.Poll(ctx, func(s string) { got = append(got, s); b.Send("echo " + s) })
-	if len(got) != 1 || got[0] != "/status" {
+	b.Poll(ctx, func(s string) { got = append(got, s); b.Send("echo " + s) },
+		func(data string, id int64) { got = append(got, fmt.Sprintf("button %s on %d", data, id)) })
+	if len(got) != 2 || got[0] != "/status" || got[1] != "button 3:2 on 42" {
 		t.Fatalf("received: %v", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	if len(answered) != 1 || answered[0] != "cb1" {
+		t.Fatalf("answered: %v", answered)
+	}
 	if len(sent) != 1 || sent[0] != "echo /status" {
 		t.Fatalf("sent: %v", sent)
 	}
@@ -85,5 +97,12 @@ func TestHTTP1Only(t *testing.T) {
 	}
 	if proto != 1 {
 		t.Fatalf("bot used HTTP/%d", proto)
+	}
+}
+
+func TestKeyboard(t *testing.T) {
+	got := keyboard([][]Button{{{Text: "Holiday", Data: "1:2"}}})
+	if got != `{"inline_keyboard":[[{"text":"Holiday","callback_data":"1:2"}]]}` {
+		t.Fatal(got)
 	}
 }

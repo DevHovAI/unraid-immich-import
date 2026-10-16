@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.0.0-beta.6] – 2026-10-17
+
+### Added
+- The album question shows buttons with the most recently used Immich albums, the date album and "No album". Typing a new name still works.
+- `/switch_album` changes the album while the import runs, with the same buttons or as `/switch_album <name>`
+
 ## [2.0.0-beta.5] – 2026-10-17
 
 ### Added

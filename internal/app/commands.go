@@ -17,6 +17,7 @@ var commands = []telegram.Command{
 	{Name: "log", Description: "last lines of the log"},
 	{Name: "stack", Description: "stack RAW+HIF/JPG pairs (optional: YYYY-MM-DD)"},
 	{Name: "none", Description: "when asked for an album: no album"},
+	{Name: "switch_album", Description: "change the album of the running import"},
 	{Name: "forget", Description: "clear the memory: the card is checked in full again"},
 	{Name: "backup", Description: "backup of the card: on, off, or show the state"},
 	{Name: "help", Description: "all commands"},
@@ -41,6 +42,7 @@ const help = `Commands:
 /stack – stack RAW+HIF/JPG pairs across the whole library
 /stack YYYY-MM-DD – only what was uploaded since that day
 /none – when asked for an album: no album
+/switch_album – change the album of the running import (buttons, or /switch_album <name>)
 /forget – forget what was already imported (e.g. to fetch photos deleted in Immich again)
 /backup on|off – also copy the card into the backup folder (/backup alone shows the state)`
 
@@ -51,7 +53,7 @@ func (a *App) handle(text string) {
 	if !strings.HasPrefix(cmd, "/") {
 		// answer to the album question
 		if a.answerAlbum(text) {
-			a.notify("📁 Album: " + text)
+			a.closePicker("📁 Album: " + text)
 		}
 		return
 	}
@@ -98,8 +100,10 @@ func (a *App) handle(text string) {
 		go a.runStack(a.ctx, since, 0, false)
 	case "/none":
 		if a.answerAlbum("") {
-			a.Bot.Send("📁 No album.")
+			a.closePicker("📁 No album.")
 		}
+	case "/switch_album":
+		a.switchAlbum(arg)
 	case "/forget":
 		if a.Imp.Current() != nil {
 			a.Bot.Send("⏳ Only after the running import.")
@@ -134,8 +138,8 @@ func (a *App) statusText() string {
 		if p.Known > 0 {
 			s += fmt.Sprintf("\n%d files imported earlier, skipped", p.Known)
 		}
-		if p.Album != "" {
-			s += "\nAlbum: " + p.Album
+		if album := p.Album(); album != "" {
+			s += "\nAlbum: " + album
 		}
 		if p.BackupTotal > 0 {
 			s += fmt.Sprintf("\n💾 Backup: %d of %d files copied, %d errors",

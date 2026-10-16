@@ -72,6 +72,7 @@ type App struct {
 	ctx       context.Context // lives as long as Run
 	mu        sync.Mutex
 	answer    chan string // open while waiting for the album name
+	picker    picker      // the last album buttons sent
 	stackMu   sync.Mutex  // only one stacking run at a time
 	stackInfo *stackState
 }
@@ -156,7 +157,7 @@ func (a *App) Run(ctx context.Context) {
 		if err := a.Bot.SetCommands(ctx, commands); err != nil {
 			a.Log.Printf("set Telegram commands: %v", err)
 		}
-		go a.Bot.Poll(ctx, a.handle)
+		go a.Bot.Poll(ctx, a.handle, a.onButton)
 	}
 	a.watch(ctx)
 }
@@ -341,55 +342,6 @@ func (a *App) lastPath() string { return filepath.Join(a.Cfg.ConfigDir, LastFile
 
 func (a *App) saveLast(msg string) {
 	_ = os.WriteFile(a.lastPath(), []byte(time.Now().Format("2006-01-02 15:04")+"\n"+msg+"\n"), 0o644)
-}
-
-// chooseAlbum picks the album name according to ALBUM_MODE; asks via
-// Telegram for "ask".
-func (a *App) chooseAlbum(ctx context.Context, card string, n int) string {
-	def := "Import " + time.Now().Format("2006-01-02")
-	switch a.Cfg.AlbumMode {
-	case "fixed":
-		return a.Cfg.Album
-	case "date":
-		return def
-	case "ask":
-	default:
-		return ""
-	}
-	ch := make(chan string, 1)
-	a.mu.Lock()
-	a.answer = ch
-	a.mu.Unlock()
-	defer func() {
-		a.mu.Lock()
-		a.answer = nil
-		a.mu.Unlock()
-	}()
-	a.notify(fmt.Sprintf("📷 Card detected: %d new files on %s%s\nWhich album? Reply with a name or /none.\nNo reply within %d min: “%s”",
-		n, card, a.mode(), int(a.Cfg.AlbumAskTimeout.Minutes()), def))
-	select {
-	case ans := <-ch:
-		return ans
-	case <-time.After(a.Cfg.AlbumAskTimeout):
-		return def
-	case <-ctx.Done():
-		return ""
-	}
-}
-
-// answerAlbum passes the answer on to a pending album question.
-func (a *App) answerAlbum(name string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.answer == nil {
-		return false
-	}
-	select {
-	case a.answer <- name:
-	default:
-	}
-	a.answer = nil
-	return true
 }
 
 // runStack stacks RAW+image pairs. If Immich still lacks the capture date,

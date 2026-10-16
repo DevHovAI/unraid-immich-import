@@ -40,7 +40,7 @@ The import works without Telegram too. The album is then called "Import YYYY-MM-
 
 | Message / command | Meaning |
 |---|---|
-| 📷 Card detected … Which album? | Reply with a name or `/none`. Without a reply, "Import YYYY-MM-DD" is created after 2 minutes. Only shown when there is something new. |
+| 📷 Card detected … Which album? | Tap one of the most recently used albums, the date album or 🚫 No album, or reply with a new name. Without an answer, "Import YYYY-MM-DD" is created after 2 minutes. Only comes when there is something new. |
 | 📷 Import started | Number and size of the new files |
 | ⏳ 25 / 50 / 75 % done | Progress (setting **Progress messages**) |
 | ✅ / ⚠️ / ⏹️ | done / with errors / cancelled. Failed files are retried the next time the card is inserted. |
@@ -52,6 +52,7 @@ The import works without Telegram too. The album is then called "Import YYYY-MM-
 | `/log` | Last lines of the log |
 | `/stack` | Stack RAW+HIF/JPG pairs across the whole library |
 | `/stack YYYY-MM-DD` | Only what was uploaded since that day |
+| `/switch_album` | Change the album while the import runs (buttons). `/switch_album <name>` sets it directly. Possible until the files are added at the end. |
 | `/backup on` / `/backup off` | Also copy the card into the backup folder (see below). `/backup` alone shows the state. |
 | `/forget` | Clear the memory, e.g. to fetch photos deleted in Immich from the card again. Anything Immich still has is not uploaded twice. |
 | `/help` | All commands |

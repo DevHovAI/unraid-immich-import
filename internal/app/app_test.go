@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,8 +21,9 @@ import (
 
 type tg struct {
 	*httptest.Server
-	mu   sync.Mutex
-	sent []string
+	mu      sync.Mutex
+	sent    []string // texts, edits as "EDIT <id>: text"
+	buttons []string // reply_markup of sent messages
 }
 
 func newTG() *tg {
@@ -31,6 +33,15 @@ func newTG() *tg {
 		if strings.HasSuffix(r.URL.Path, "/sendMessage") {
 			t.mu.Lock()
 			t.sent = append(t.sent, r.Form.Get("text"))
+			t.buttons = append(t.buttons, r.Form.Get("reply_markup"))
+			id := len(t.sent)
+			t.mu.Unlock()
+			fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d}}`, id)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/editMessageText") {
+			t.mu.Lock()
+			t.sent = append(t.sent, "EDIT "+r.Form.Get("message_id")+": "+r.Form.Get("text"))
 			t.mu.Unlock()
 		}
 		if strings.HasSuffix(r.URL.Path, "/getUpdates") {
@@ -221,5 +232,93 @@ func TestUnmount(t *testing.T) {
 	}
 	if _, err := os.Stat(req); err == nil {
 		t.Fatal("no request when turned off")
+	}
+}
+
+// Album buttons: recent albums are offered, a press answers the question,
+// and /switch_album changes the album while the upload runs.
+func TestAlbumButtonsAndSwitch(t *testing.T) {
+	srv := fakeimmich.New()
+	defer srv.Close()
+	srv.Delay = 300 * time.Millisecond
+	bot := newTG()
+	defer bot.Close()
+
+	dir := t.TempDir()
+	disks := filepath.Join(dir, "disks")
+	os.MkdirAll(disks, 0o755)
+	cfg, _ := config.Load(func(k string) string {
+		return map[string]string{
+			"IMMICH_URL": srv.URL, "IMMICH_API_KEY": "KEY", "TG_BOT_TOKEN": "T", "TG_CHAT_ID": "1",
+			"DISKS_DIR": disks, "CONFIG_DIR": dir, "POLL_INTERVAL": "1", "PROGRESS_STEPS": "",
+			"STACK_PAIRS": "0", "AUTO_UNMOUNT": "0", "UPLOAD_PARALLEL": "1",
+		}[k]
+	})
+	mem, _ := memory.Open(filepath.Join(dir, MemoryFile))
+	a := New(cfg, "test", NewLogger(filepath.Join(dir, "log"), io.Discard), mem)
+	a.Bot.API = bot.URL
+	for _, n := range []string{"Old trip", "Summer"} {
+		if _, err := a.Immich.AddToAlbum(context.Background(), n, nil); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	a.handle("/switch_album")
+	bot.waitFor(t, "No import running")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx)
+	root := filepath.Join(disks, "SONY")
+	os.MkdirAll(filepath.Join(root, "DCIM", "100MSDCF"), 0o755)
+	for _, n := range []string{"DSC00001.JPG", "DSC00002.JPG", "DSC00003.JPG"} {
+		os.WriteFile(filepath.Join(root, "DCIM", "100MSDCF", n), []byte(n), 0o644)
+	}
+	bot.waitFor(t, "Which album?")
+	bot.mu.Lock()
+	kb := bot.buttons[len(bot.buttons)-1]
+	bot.mu.Unlock()
+	// most recently changed first, date album and "no album" last
+	if !strings.Contains(kb, "Summer") || strings.Index(kb, "Summer") > strings.Index(kb, "Old trip") ||
+		!strings.Contains(kb, "No album") {
+		t.Fatalf("buttons: %s", kb)
+	}
+
+	a.mu.Lock()
+	seq, names := a.picker.seq, a.picker.names
+	a.mu.Unlock()
+	if names[2] != "Summer" {
+		t.Fatalf("names %q", names)
+	}
+	a.onButton(fmt.Sprintf("%d:2", seq), 7)
+	bot.waitFor(t, "EDIT 7: 📁 Album: Summer")
+	bot.waitFor(t, "Import started")
+
+	// while uploading: switch via buttons to "Old trip"
+	a.handle("/switch_album")
+	bot.waitFor(t, "Album of the running import: Summer")
+	a.mu.Lock()
+	seq2, names := a.picker.seq, a.picker.names
+	a.mu.Unlock()
+	a.onButton(fmt.Sprintf("%d:%d", seq, 2), 8) // old message
+	bot.waitFor(t, "EDIT 8: This selection is outdated")
+	idx := -1
+	for i, n := range names {
+		if n == "Old trip" {
+			idx = i
+		}
+	}
+	a.onButton(fmt.Sprintf("%d:%d", seq2, idx), 9)
+	bot.waitFor(t, "EDIT 9: 📁 Switched to album: Old trip")
+
+	sum := bot.waitFor(t, "✅ Import done")
+	if !strings.Contains(sum, "Album: Old trip (3 newly added)") {
+		t.Fatalf("summary: %s", sum)
+	}
+	srv.Lock()
+	defer srv.Unlock()
+	if len(srv.Albums["Old trip"]) != 3 || len(srv.Albums["Summer"]) != 0 {
+		t.Fatalf("albums: %v", srv.Albums)
 	}
 }

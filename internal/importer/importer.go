@@ -54,7 +54,6 @@ type Importer struct {
 
 type Progress struct {
 	Card     string
-	Album    string
 	Start    time.Time
 	Total    int   // new files
 	Known    int   // skipped thanks to the memory
@@ -73,6 +72,40 @@ type Progress struct {
 	BackupDone   atomic.Int64
 	BackupFailed atomic.Int64
 	BackupBytesC atomic.Int64 // bytes copied
+
+	album albumState
+}
+
+// The album can still change while the import runs (/switch_album): the
+// files are only added at the end.
+type albumState struct {
+	mu     sync.Mutex
+	name   string
+	locked bool // files are being added, too late to change
+}
+
+func (p *Progress) Album() string {
+	p.album.mu.Lock()
+	defer p.album.mu.Unlock()
+	return p.album.name
+}
+
+// SetAlbum changes the album; false if the files are already being added.
+func (p *Progress) SetAlbum(name string) bool {
+	p.album.mu.Lock()
+	defer p.album.mu.Unlock()
+	if p.album.locked {
+		return false
+	}
+	p.album.name = name
+	return true
+}
+
+func (p *Progress) lockAlbum() string {
+	p.album.mu.Lock()
+	defer p.album.mu.Unlock()
+	p.album.locked = true
+	return p.album.name
 }
 
 func (p *Progress) Phase() string     { s, _ := p.phase.Load().(string); return s }
@@ -197,7 +230,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 
 	if im.ChooseAlbum != nil && len(fresh) > 0 {
 		res.Album = im.ChooseAlbum(ctx, card.Label, len(fresh))
-		p.Album = res.Album
+		p.SetAlbum(res.Album)
 	}
 	mode := ""
 	if im.Opt.DryRun {
@@ -229,6 +262,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	res.Duration = time.Since(res.Start)
 
 	// Only the really new files go into the album
+	res.Album = p.lockAlbum()
 	if res.Album != "" && len(res.CreatedIDs) > 0 {
 		p.setPhase(PhaseAddAlbum)
 		if _, err := im.Immich.AddToAlbum(context.WithoutCancel(ctx), res.Album, res.CreatedIDs); err != nil {
