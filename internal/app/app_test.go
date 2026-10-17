@@ -166,7 +166,7 @@ func TestBackupCommand(t *testing.T) {
 	if s := a.backupCommand("true"); !strings.Contains(s, "Backup on") {
 		t.Fatalf("%s", s)
 	}
-	if s := a.backupCommand(""); !strings.Contains(s, "Backup is on") {
+	if s := a.backupCommand("status"); !strings.Contains(s, "Automatic backup is on") {
 		t.Fatalf("%s", s)
 	}
 	// survives a restart
@@ -320,5 +320,99 @@ func TestAlbumButtonsAndSwitch(t *testing.T) {
 	defer srv.Unlock()
 	if len(srv.Albums["Old trip"]) != 3 || len(srv.Albums["Summer"]) != 0 {
 		t.Fatalf("albums: %v", srv.Albums)
+	}
+}
+
+// /backup without on/off: now if a card is inserted, otherwise the next card
+// once; the automatic backup stays off.
+func TestBackupNow(t *testing.T) {
+	srv := fakeimmich.New()
+	defer srv.Close()
+	bot := newTG()
+	defer bot.Close()
+	dir := t.TempDir()
+	disks := filepath.Join(dir, "disks")
+	backup := filepath.Join(dir, "backup")
+	os.MkdirAll(disks, 0o755)
+	cfg, _ := config.Load(func(k string) string {
+		return map[string]string{
+			"IMMICH_URL": srv.URL, "IMMICH_API_KEY": "KEY", "TG_BOT_TOKEN": "T", "TG_CHAT_ID": "1",
+			"DISKS_DIR": disks, "CONFIG_DIR": dir, "BACKUP_DIR": backup, "POLL_INTERVAL": "1",
+			"PROGRESS_STEPS": "", "STACK_PAIRS": "0", "AUTO_UNMOUNT": "0", "ALBUM_MODE": "none",
+		}[k]
+	})
+	mem, _ := memory.Open(filepath.Join(dir, MemoryFile))
+	a := New(cfg, "test", NewLogger(filepath.Join(dir, "log"), io.Discard), mem)
+	a.Bot.API = bot.URL
+
+	if s := a.backupCommand(""); !strings.Contains(s, "No backup possible") {
+		t.Fatalf("without folder: %s", s)
+	}
+	os.Mkdir(backup, 0o755)
+
+	card := func(name, file string) {
+		p := filepath.Join(disks, name, "DCIM", "100MSDCF")
+		os.MkdirAll(p, 0o755)
+		os.WriteFile(filepath.Join(p, file), []byte(file), 0o644)
+	}
+	count := func() int {
+		n := 0
+		filepath.WalkDir(backup, func(_ string, d os.DirEntry, _ error) error {
+			if d != nil && !d.IsDir() {
+				n++
+			}
+			return nil
+		})
+		return n
+	}
+
+	// no card: armed for the next one
+	if s := a.backupCommand(""); !strings.Contains(s, "next card is backed up once") {
+		t.Fatal(s)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx)
+	card("A", "DSC00001.JPG")
+	sum := bot.waitFor(t, "✅ Import done")
+	if !strings.Contains(sum, "fully backed up") || count() != 1 {
+		t.Fatalf("next card: %s, %d files", sum, count())
+	}
+	if a.backupOn.Load() || a.backupOnce.Load() {
+		t.Fatal("one-off backup must not stay on")
+	}
+
+	// card inserted and imported without backup: /backup copies it now
+	card("B", "DSC00002.JPG")
+	bot.waitFor(t, "(B): 1 new")
+	if count() != 1 {
+		t.Fatal("B must not be backed up automatically")
+	}
+	if s := a.backupCommand(""); !strings.Contains(s, "Backing up now") {
+		t.Fatal(s)
+	}
+	bot.waitFor(t, "💾 Backup done (B)")
+	if count() != 2 {
+		t.Fatalf("%d files", count())
+	}
+	if len(srv.Albums) != 0 {
+		t.Fatalf("backup only must not import: %v", srv.Albums)
+	}
+	a.backupCommand("")
+	bot.waitFor(t, "everything already backed up")
+
+	// during an import: backed up right after it, before unmounting
+	srv.Delay = 400 * time.Millisecond
+	card("C", "DSC00003.JPG")
+	for a.Imp.Current() == nil {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s := a.backupCommand(""); !strings.Contains(s, "right after the running import") {
+		t.Fatal(s)
+	}
+	bot.waitFor(t, "(C): 1 new")
+	bot.waitFor(t, "💾 Backup done (C)")
+	if count() != 3 {
+		t.Fatalf("%d files", count())
 	}
 }

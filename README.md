@@ -53,7 +53,8 @@ The import works without Telegram too. The album is then called "Import YYYY-MM-
 | `/stack` | Stack RAW+HIF/JPG pairs across the whole library |
 | `/stack YYYY-MM-DD` | Only what was uploaded since that day |
 | `/switch_album` | Change the album while the import runs (buttons). `/switch_album <name>` sets it directly. Possible until the files are added at the end. |
-| `/backup on` / `/backup off` | Also copy the card into the backup folder (see below). `/backup` alone shows the state. |
+| `/backup` | Back up the inserted card now, without importing. During an import: right after it. Without a card: the next card, once. |
+| `/backup on` / `/backup off` | Back up every card before the import (see below). `/backup status` shows the state. |
 | `/forget` | Clear the memory, e.g. to fetch photos deleted in Immich from the card again. Anything Immich still has is not uploaded twice. |
 | `/help` | All commands |
 
@@ -64,9 +65,9 @@ The bot only reacts to messages from the configured chat. The German commands of
 Besides Immich, camera-import can keep a plain copy of the card, e.g. on a share of the array.
 
 1. Create a share, e.g. `camera-backup`, and enter `/mnt/user/camera-backup/` as **Backup folder** in the container template.
-2. Send `/backup on` in the bot.
+2. Send `/backup on` in the bot, or `/backup` for a single backup.
 
-From then on, every inserted card is first copied there, then imported. The files land in one folder per day, e.g. `2026/2026-10-16/DSC01234.ARW`, with their original time. A file with the same name but different content (the camera's counter started over) gets a suffix: `DSC01234_1.ARW`.
+With `/backup on`, every inserted card is first copied there, then imported. `/backup` alone backs up once: the inserted card right away (without importing it), after the running import, or else the next card that is inserted. The files land in one folder per day, e.g. `2026/2026-10-16/DSC01234.ARW`, with their original time. A file with the same name but different content (the camera's counter started over) gets a suffix: `DSC01234_1.ARW`.
 
 - Every copy is read back and compared with the card by checksum.
 - Like the import, the backup remembers what is done (`backed-up.txt`): a file is copied once, a failed one again the next time.

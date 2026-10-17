@@ -19,7 +19,7 @@ var commands = []telegram.Command{
 	{Name: "none", Description: "when asked for an album: no album"},
 	{Name: "switch_album", Description: "change the album of the running import"},
 	{Name: "forget", Description: "clear the memory: the card is checked in full again"},
-	{Name: "backup", Description: "backup of the card: on, off, or show the state"},
+	{Name: "backup", Description: "back up the card now; on/off: always; status"},
 	{Name: "help", Description: "all commands"},
 }
 
@@ -44,7 +44,9 @@ const help = `Commands:
 /none – when asked for an album: no album
 /switch_album – change the album of the running import (buttons, or /switch_album <name>)
 /forget – forget what was already imported (e.g. to fetch photos deleted in Immich again)
-/backup on|off – also copy the card into the backup folder (/backup alone shows the state)`
+/backup – back up the inserted card now (or the next one)
+/backup on|off – back up every card before the import
+/backup status – state and folder`
 
 // handle processes a message from our own chat.
 func (a *App) handle(text string) {
@@ -128,6 +130,11 @@ func (a *App) statusText() string {
 	var parts []string
 	if p := a.Imp.Current(); p != nil {
 		phase := p.Phase()
+		if p.Total == 0 && p.BackupTotal > 0 {
+			parts = append(parts, fmt.Sprintf("💾 Backup running%s (%s): %d of %d files copied, %d errors\nRunning for: %s",
+				a.mode(), p.Card, p.BackupDone.Load(), p.BackupTotal, p.BackupFailed.Load(),
+				importer.FmtDur(time.Since(p.Start))))
+		}
 		s := fmt.Sprintf("📊 Import running%s (%s): %s\n", a.mode(), p.Card, phase)
 		if phase == importer.PhaseChecking {
 			s += fmt.Sprintf("Checked: %d of %d new files\n", p.Checked.Load(), p.Total)
@@ -145,7 +152,9 @@ func (a *App) statusText() string {
 			s += fmt.Sprintf("\n💾 Backup: %d of %d files copied, %d errors",
 				p.BackupDone.Load(), p.BackupTotal, p.BackupFailed.Load())
 		}
-		parts = append(parts, s)
+		if p.Total > 0 || p.BackupTotal == 0 {
+			parts = append(parts, s)
+		}
 	}
 	a.mu.Lock()
 	if st := a.stackInfo; st != nil {
@@ -179,11 +188,13 @@ func (a *App) backupCommand(arg string) string {
 	}
 	switch strings.ToLower(arg) {
 	case "":
+		return a.backupNow()
+	case "status":
 		state := "off"
 		if a.backupOn.Load() {
 			state = "on"
 		}
-		s := fmt.Sprintf("💾 Backup is %s. Folder: %s, %d files backed up.\n/backup on or /backup off",
+		s := fmt.Sprintf("💾 Automatic backup is %s. Folder: %s, %d files backed up.\n/backup backs up now, /backup on or /backup off",
 			state, a.Cfg.BackupDir, a.Backup.Mem.Len())
 		if err := a.Backup.Ready(); err != nil {
 			s += "\n⚠️ " + err.Error()
@@ -208,6 +219,6 @@ func (a *App) backupCommand(arg string) string {
 		}
 		return "💾 Backup off."
 	default:
-		return "Use /backup on, /backup off, or /backup alone for the state."
+		return "Use /backup (back up now), /backup on, /backup off or /backup status."
 	}
 }

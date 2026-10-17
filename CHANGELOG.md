@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.0-beta.7] – 2026-10-17
+
+### Added
+- `/backup` alone backs up once: the inserted card right away, after the running import, or the next card that is inserted. The automatic backup (`/backup on`) is not changed by it.
+
+### Changed
+- The state of the backup is now `/backup status`
+
 ## [2.0.0-beta.6] – 2026-10-17
 
 ### Added

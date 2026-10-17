@@ -136,7 +136,8 @@ type Result struct {
 	Errors     []string
 	CreatedIDs []string
 
-	Backup BackupResult
+	Backup     BackupResult
+	BackupOnly bool // started with /backup, nothing imported
 }
 
 type BackupResult struct {
@@ -180,7 +181,16 @@ type job struct {
 // Import backs up (if turned on) and uploads all new files on the card.
 // Known files (memory) are not touched, only recognised via stat.
 func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
-	res := Result{Card: card.Label, Start: time.Now()}
+	return im.run(ctx, card, true, im.BackupOn != nil && im.BackupOn())
+}
+
+// BackupOnly backs up the card without importing (/backup).
+func (im *Importer) BackupOnly(ctx context.Context, card Card) (Result, error) {
+	return im.run(ctx, card, false, true)
+}
+
+func (im *Importer) run(ctx context.Context, card Card, upload, backup bool) (Result, error) {
+	res := Result{Card: card.Label, Start: time.Now(), BackupOnly: !upload}
 	files, err := Scan(card)
 	if err != nil {
 		return res, fmt.Errorf("read card: %w", err)
@@ -188,6 +198,9 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	var fresh, toBackup []File
 	var bytes, backupBytes int64
 	for _, f := range files {
+		if !upload {
+			continue
+		}
 		if im.Mem.Has(f.Key()) {
 			res.Known++
 		} else {
@@ -195,7 +208,7 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 			bytes += f.Size
 		}
 	}
-	if im.BackupOn != nil && im.BackupOn() {
+	if backup && im.Backup != nil {
 		res.Backup.On = true
 		for _, f := range files {
 			if im.Backup.Mem.Has(f.Key()) {
@@ -245,6 +258,10 @@ func (im *Importer) Import(ctx context.Context, card Card) (Result, error) {
 	}
 	if len(toBackup) > 0 {
 		msg += fmt.Sprintf("\n💾 Backup first: %d files (%s)", len(toBackup), fmtBytes(backupBytes))
+	}
+	if !upload {
+		msg = fmt.Sprintf("💾 Backup started%s: %d files from %s (%s), %d backed up earlier",
+			mode, len(toBackup), card.Label, fmtBytes(backupBytes), res.Backup.Known)
 	}
 	if res.Album != "" {
 		msg += fmt.Sprintf("\nAlbum: %s", res.Album)

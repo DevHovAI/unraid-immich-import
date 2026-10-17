@@ -62,7 +62,10 @@ type App struct {
 	Imp     *importer.Importer
 	Backup  *importer.Backup // nil if its memory could not be opened
 
-	backupOn atomic.Bool
+	backupOn   atomic.Bool // /backup on|off, kept in backup.txt
+	backupOnce atomic.Bool // /backup without a card: back up the next one once
+	runBackup  atomic.Bool // the run that is starting includes the backup
+	runMu      sync.Mutex  // one card run (import or backup) at a time
 
 	// StackRetryDelay: how long to wait until Immich has read the metadata
 	StackRetryDelay time.Duration
@@ -92,7 +95,7 @@ func New(cfg config.Config, version string, log *Logger, mem *memory.Store) *App
 	a.Imp = &importer.Importer{
 		Opt:    importer.Options{DryRun: cfg.DryRun, Parallel: cfg.Parallel, ProgressSteps: cfg.ProgressSteps},
 		Immich: a.Immich, Mem: mem, Notify: a.notify, Logf: log.Printf,
-		ChooseAlbum: a.chooseAlbum, BackupOn: a.backupOn.Load,
+		ChooseAlbum: a.chooseAlbum, BackupOn: a.runBackup.Load,
 	}
 	if bm, err := memory.Open(filepath.Join(cfg.ConfigDir, BackupMemoryFile)); err != nil {
 		log.Printf("open backup memory: %v – backup is not available", err)
@@ -211,15 +214,15 @@ func (a *App) watch(ctx context.Context) {
 }
 
 func (a *App) importCard(ctx context.Context, c importer.Card) {
+	a.runMu.Lock()
+	defer a.runMu.Unlock()
 	a.Log.Printf("card detected: %s", c.Root)
+	a.runBackup.Store(a.backupOn.Load() || a.backupOnce.Swap(false))
 	res, err := a.Imp.Import(ctx, c)
 	var msg string
 	switch {
 	case err != nil:
-		msg = fmt.Sprintf("❌ Import from %s failed: %v", c.Label, err)
-		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
-			msg += "\nThe container is not allowed to read the card – see README (Unassigned Devices)."
-		}
+		msg = failed("Import", c, err)
 	case res.Total == 0 && res.Backup.Total == 0:
 		msg = fmt.Sprintf("📷 %s: nothing new (%d files already imported", c.Label, res.Known)
 		if res.Backup.On {
@@ -228,6 +231,13 @@ func (a *App) importCard(ctx context.Context, c importer.Card) {
 		msg += ")."
 	default:
 		msg = summary(res, a.mode())
+	}
+
+	// /backup arrived during the import: back up before unmounting
+	if err == nil && ctx.Err() == nil && !res.Canceled && !res.Backup.On && a.backupOnce.Swap(false) {
+		a.notify(msg)
+		a.saveLast(msg)
+		msg = a.backupCard(ctx, c)
 	}
 	if ctx.Err() == nil {
 		msg += "\n" + a.unmount(c)
@@ -239,6 +249,66 @@ func (a *App) importCard(ctx context.Context, c importer.Card) {
 		since := res.Start.Add(-5 * time.Second)
 		go a.runStack(ctx, &since, 3, true)
 	}
+}
+
+func failed(what string, c importer.Card, err error) string {
+	msg := fmt.Sprintf("❌ %s from %s failed: %v", what, c.Label, err)
+	if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
+		msg += "\nThe container is not allowed to read the card – see README (Unassigned Devices)."
+	}
+	return msg
+}
+
+// backupCard backs up a card without importing and returns the summary.
+func (a *App) backupCard(ctx context.Context, c importer.Card) string {
+	res, err := a.Imp.BackupOnly(ctx, c)
+	bk := res.Backup
+	var b strings.Builder
+	switch {
+	case err != nil:
+		return failed("Backup", c, err)
+	case bk.Total == 0:
+		return fmt.Sprintf("💾 %s: everything already backed up (%d files).", c.Label, bk.Known)
+	case res.Canceled:
+		fmt.Fprintf(&b, "⏹️ Backup cancelled (%s): %d of %d copied", c.Label, bk.Copied, bk.Total)
+	default:
+		fmt.Fprintf(&b, "💾 Backup done%s (%s), took %s", a.mode(), c.Label, importer.FmtDur(res.Duration))
+		backupLines(&b, bk, a.mode())
+	}
+	return b.String()
+}
+
+// backupNow handles /backup: back up the inserted card now, after the
+// running import, or the next card that is inserted.
+func (a *App) backupNow() string {
+	if err := a.Backup.Ready(); err != nil {
+		return "❌ No backup possible: " + err.Error()
+	}
+	if !a.runMu.TryLock() {
+		if p := a.Imp.Current(); p != nil && p.BackupTotal > 0 {
+			return "💾 The running import already includes the backup."
+		}
+		a.backupOnce.Store(true)
+		return "💾 The card is backed up right after the running import."
+	}
+	cards, _, _ := importer.FindCards(a.Cfg.DisksDir)
+	if len(cards) == 0 {
+		a.runMu.Unlock()
+		a.backupOnce.Store(true)
+		return "💾 No card inserted. The next card is backed up once (and imported as usual)."
+	}
+	go func() {
+		defer a.runMu.Unlock()
+		for _, c := range cards {
+			msg := a.backupCard(a.ctx, c)
+			if a.ctx.Err() == nil {
+				msg += "\n" + a.unmount(c)
+			}
+			a.notify(msg)
+			a.saveLast(msg)
+		}
+	}()
+	return "💾 Backing up now …"
 }
 
 func summary(r importer.Result, mode string) string {
@@ -258,22 +328,8 @@ func summary(r importer.Result, mode string) string {
 	if r.Known > 0 {
 		fmt.Fprintf(&b, "\n%d files imported earlier, skipped", r.Known)
 	}
-	if bk := r.Backup; bk.Total > 0 {
-		verb := "copied"
-		if mode != "" {
-			verb = "would be copied"
-		}
-		switch {
-		case bk.Failed == 0 && bk.Copied == bk.Total:
-			fmt.Fprintf(&b, "\n💾 Backup: %d %s – the card is fully backed up", bk.Copied, verb)
-		case bk.Failed == 0:
-			fmt.Fprintf(&b, "\n💾 Backup: %d of %d %s", bk.Copied, bk.Total, verb)
-		default:
-			fmt.Fprintf(&b, "\n⚠️ Backup: %d %s, %d errors – retried the next time the card is inserted", bk.Copied, verb, bk.Failed)
-		}
-		for _, e := range bk.Errors {
-			fmt.Fprintf(&b, "\n• Backup: %s", e)
-		}
+	if r.Backup.Total > 0 {
+		backupLines(&b, r.Backup, mode)
 	}
 	if r.Trashed > 0 {
 		fmt.Fprintf(&b, "\n%d of them are in Immich's trash", r.Trashed)
@@ -335,6 +391,24 @@ func (a *App) clearUnmountRequests() {
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		os.Remove(filepath.Join(dir, e.Name()))
+	}
+}
+
+func backupLines(b *strings.Builder, bk importer.BackupResult, mode string) {
+	verb := "copied"
+	if mode != "" {
+		verb = "would be copied"
+	}
+	switch {
+	case bk.Failed == 0 && bk.Copied == bk.Total:
+		fmt.Fprintf(b, "\n💾 Backup: %d %s – the card is fully backed up", bk.Copied, verb)
+	case bk.Failed == 0:
+		fmt.Fprintf(b, "\n💾 Backup: %d of %d %s", bk.Copied, bk.Total, verb)
+	default:
+		fmt.Fprintf(b, "\n⚠️ Backup: %d %s, %d errors – retried the next time the card is inserted", bk.Copied, verb, bk.Failed)
+	}
+	for _, e := range bk.Errors {
+		fmt.Fprintf(b, "\n• Backup: %s", e)
 	}
 }
 
